@@ -1,11 +1,11 @@
-import express from 'express';
-import cors from 'cors';
 import compression from 'compression';
+import cors from 'cors';
+import express from 'express';
 import morgan from 'morgan';
 import { config } from './config';
-import DatabaseService from './services/database';
-import SubgraphCacheService from './services/cache';
 import apiRoutes from './routes';
+import SubgraphCacheService from './services/cache';
+import DatabaseService from './services/database';
 
 const app = express();
 
@@ -111,6 +111,8 @@ async function startServer() {
       console.log(`   GET  /api/positions    - Cached positions`);
       console.log(`   GET  /api/orders       - Cached orders`);
       console.log(`   GET  /api/stats        - Cache statistics`);
+      console.log(`   GET  /api/prices       - Cached prices`);
+      console.log(`   GET  /api/liquidation-thresholds - Cached liquidation thresholds`);
     });
 
     // Handle server errors

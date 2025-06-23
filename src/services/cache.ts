@@ -1,9 +1,11 @@
 import cron from 'node-cron';
 import { config } from '../config';
+import { AssetConfiguration } from '../models/AssetConfiguration';
 import { DebtPosition } from '../models/DebtPosition';
 import { Order } from '../models/Order';
+import { Token } from '../models/Token';
 import { User } from '../models/User';
-import { SubgraphDebtPosition, SubgraphOrder, SubgraphUser } from '../types';
+import { SubgraphAssetConfiguration, SubgraphDebtPosition, SubgraphOrder, SubgraphToken, SubgraphUser } from '../types';
 import SubgraphService from './subgraph';
 
 export class SubgraphCacheService {
@@ -70,12 +72,15 @@ export class SubgraphCacheService {
     try {
       console.log('🔄 Starting cache update...');
 
-      const { users, debtPositions, orders } = await this.subgraphService.fetchAllData();
+      const { users, debtPositions, orders, priceTokens, liquidationThresholds } =
+        await this.subgraphService.fetchAllData();
 
       await Promise.all([
         this.cacheUsers(users.data?.users || []),
         this.cacheDebtPositions(debtPositions.data?.debtPositions || []),
         this.cacheOrders(orders.data?.fullSaleOrderExecutions || []),
+        this.cachePriceTokens(priceTokens.data?.tokens || []),
+        this.cacheLiquidationThresholds(liquidationThresholds.data?.assetConfigurations || []),
       ]);
 
       const duration = Date.now() - startTime;
@@ -184,6 +189,63 @@ export class SubgraphCacheService {
     }
   }
 
+  private async cachePriceTokens(tokens: SubgraphToken[]): Promise<void> {
+    if (tokens.length === 0) return;
+
+    try {
+      const operations = tokens.map(token => ({
+        updateOne: {
+          filter: { id: token.id },
+          update: {
+            $set: {
+              id: token.id,
+              symbol: token.symbol,
+              decimals: token.decimals,
+              priceUSD: token.priceUSD,
+              oracleSource: token.oracleSource,
+              lastUpdatedAt: token.lastUpdatedAt,
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+      const result = await Token.bulkWrite(operations);
+      console.log(`💰 Price tokens cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+    } catch (error) {
+      console.error('❌ Failed to cache price tokens:', error);
+    }
+  }
+
+  private async cacheLiquidationThresholds(assetConfigurations: SubgraphAssetConfiguration[]): Promise<void> {
+    if (assetConfigurations.length === 0) return;
+
+    try {
+      const operations = assetConfigurations.map(config => ({
+        updateOne: {
+          filter: { id: config.id },
+          update: {
+            $set: {
+              id: config.id,
+              symbol: config.symbol,
+              liquidationThreshold: config.liquidationThreshold,
+              liquidationBonus: config.liquidationBonus,
+              reserveFactor: config.reserveFactor,
+              isActive: config.isActive,
+              lastUpdatedAt: config.lastUpdatedAt,
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+      const result = await AssetConfiguration.bulkWrite(operations);
+      console.log(`⚙️ Asset configurations cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+    } catch (error) {
+      console.error('❌ Failed to cache asset configurations:', error);
+    }
+  }
+
   public async getCachedUsers(limit = 100, offset = 0): Promise<any[]> {
     return User.find().sort({ totalVolumeTraded: -1 }).limit(limit).skip(offset).lean();
   }
@@ -201,17 +263,38 @@ export class SubgraphCacheService {
       .lean();
   }
 
+  public async getCachedPriceTokens(limit = 100, offset = 0, symbol?: string): Promise<any[]> {
+    const filter = symbol ? { symbol: symbol.toUpperCase() } : {};
+    return Token.find(filter).sort({ lastUpdatedAt: -1 }).limit(limit).skip(offset).lean();
+  }
+
+  public async getCachedLiquidationThresholds(
+    limit = 100,
+    offset = 0,
+    symbol?: string,
+    isActive?: boolean,
+  ): Promise<any[]> {
+    const filter: any = {};
+    if (symbol) filter.symbol = symbol.toUpperCase();
+    if (isActive !== undefined) filter.isActive = isActive;
+    return AssetConfiguration.find(filter).sort({ lastUpdatedAt: -1 }).limit(limit).skip(offset).lean();
+  }
+
   public async getStats(): Promise<any> {
-    const [userCount, positionCount, orderCount] = await Promise.all([
+    const [userCount, positionCount, orderCount, tokenCount, assetConfigCount] = await Promise.all([
       User.countDocuments(),
       DebtPosition.countDocuments(),
       Order.countDocuments(),
+      Token.countDocuments(),
+      AssetConfiguration.countDocuments(),
     ]);
 
     return {
       users: userCount,
       positions: positionCount,
       orders: orderCount,
+      tokens: tokenCount,
+      assetConfigurations: assetConfigCount,
       lastUpdate: new Date().toISOString(),
       cacheEnabled: config.cache.enabled,
       intervalSeconds: config.cache.intervalSeconds,

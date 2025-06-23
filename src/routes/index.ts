@@ -1,8 +1,8 @@
 import express, { Request, Response } from 'express';
-import SubgraphService from '../services/subgraph';
 import SubgraphCacheService from '../services/cache';
 import DatabaseService from '../services/database';
-import { GraphQLQuery, ApiResponse } from '../types';
+import SubgraphService from '../services/subgraph';
+import { ApiResponse, GraphQLQuery } from '../types';
 
 const router = express.Router();
 
@@ -189,6 +189,41 @@ router.get('/orders', async (req: Request, res: Response) => {
   }
 });
 
+// Get cached price tokens
+router.get('/prices', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const symbol = req.query.symbol as string;
+
+    const cacheService = SubgraphCacheService.getInstance();
+    const tokens = await cacheService.getCachedPriceTokens(limit, offset, symbol);
+
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        tokens,
+        pagination: {
+          limit,
+          offset,
+          count: tokens.length,
+          symbol,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    return res.json(response);
+  } catch (error) {
+    const response: ApiResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+    return res.status(500).json(response);
+  }
+});
+
 // Get cache statistics
 router.get('/stats', async (req: Request, res: Response) => {
   try {
@@ -198,6 +233,43 @@ router.get('/stats', async (req: Request, res: Response) => {
     const response: ApiResponse = {
       success: true,
       data: stats,
+      timestamp: new Date().toISOString(),
+    };
+
+    return res.json(response);
+  } catch (error) {
+    const response: ApiResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+    return res.status(500).json(response);
+  }
+});
+
+// Get cached liquidation thresholds
+router.get('/liquidation-thresholds', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const symbol = req.query.symbol as string;
+    const isActive = req.query.isActive === 'true' ? true : req.query.isActive === 'false' ? false : undefined;
+
+    const cacheService = SubgraphCacheService.getInstance();
+    const assetConfigurations = await cacheService.getCachedLiquidationThresholds(limit, offset, symbol, isActive);
+
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        assetConfigurations,
+        pagination: {
+          limit,
+          offset,
+          count: assetConfigurations.length,
+          symbol,
+          isActive,
+        },
+      },
       timestamp: new Date().toISOString(),
     };
 

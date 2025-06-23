@@ -6,6 +6,16 @@ export interface SubgraphUser {
   totalVolumeTraded: string;
 }
 
+// Token entity from subgraph
+export interface SubgraphToken {
+  id: string;
+  symbol: string;
+  decimals: number;
+  priceUSD: string;
+  oracleSource: string;
+  lastUpdatedAt: string;
+}
+
 // Debt position entity from subgraph
 export interface SubgraphDebtPosition {
   id: string;
@@ -50,6 +60,17 @@ export interface SubgraphOrder {
   blockNumber: string;
   gasUsed: string;
   gasPriceGwei: string;
+}
+
+// Asset configuration entity from subgraph
+export interface SubgraphAssetConfiguration {
+  id: string;
+  symbol: string;
+  liquidationThreshold: string;
+  liquidationBonus: string;
+  reserveFactor: string;
+  isActive: boolean;
+  lastUpdatedAt: string;
 }
 
 // GraphQL query types

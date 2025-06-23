@@ -154,19 +154,66 @@ export class SubgraphService {
     });
   }
 
+  public async fetchPriceTokens(first = 100, skip = 0): Promise<GraphQLResponse> {
+    const query = `
+      query GetPriceTokens($first: Int!, $skip: Int!) {
+        tokens(first: $first, skip: $skip, orderBy: lastUpdatedAt, orderDirection: desc) {
+          id
+          symbol
+          decimals
+          priceUSD
+          oracleSource
+          lastUpdatedAt
+        }
+      }
+    `;
+
+    return this.executeQuery({
+      query,
+      variables: { first, skip },
+      operationName: 'GetPriceTokens',
+    });
+  }
+
+  public async fetchLiquidationThresholds(first = 100, skip = 0): Promise<GraphQLResponse> {
+    const query = `
+      query QueryLiquidationThreshold($first: Int!, $skip: Int!) {
+        assetConfigurations(first: $first, skip: $skip, orderBy: lastUpdatedAt, orderDirection: desc) {
+          liquidationThreshold
+          liquidationBonus
+          lastUpdatedAt
+          isActive
+          id
+          symbol
+          reserveFactor
+        }
+      }
+    `;
+
+    return this.executeQuery({
+      query,
+      variables: { first, skip },
+      operationName: 'QueryLiquidationThreshold',
+    });
+  }
+
   public async fetchAllData(): Promise<{
     users: GraphQLResponse;
     debtPositions: GraphQLResponse;
     orders: GraphQLResponse;
+    priceTokens: GraphQLResponse;
+    liquidationThresholds: GraphQLResponse;
   }> {
     try {
-      const [users, debtPositions, orderExecutions] = await Promise.all([
+      const [users, debtPositions, orderExecutions, priceTokens, liquidationThresholds] = await Promise.all([
         this.fetchUsers(),
         this.fetchDebtPositions(),
         this.fetchOrders(), // This now fetches order executions
+        this.fetchPriceTokens(),
+        this.fetchLiquidationThresholds(),
       ]);
 
-      return { users, debtPositions, orders: orderExecutions };
+      return { users, debtPositions, orders: orderExecutions, priceTokens, liquidationThresholds };
     } catch (error) {
       console.error('❌ Failed to fetch all subgraph data:', error);
       throw error;
