@@ -120,7 +120,7 @@ router.get('/positions', async (req: Request, res: Response) => {
     const owner = req.query.owner as string;
 
     const cacheService = SubgraphCacheService.getInstance();
-    const positions = await cacheService.getCachedDebtPositions(limit, offset, owner);
+    const { positions, total } = await cacheService.getCachedDebtPositions(limit, offset, owner);
 
     const response: ApiResponse = {
       success: true,
@@ -130,6 +130,7 @@ router.get('/positions', async (req: Request, res: Response) => {
           limit,
           offset,
           count: positions.length,
+          total,
           owner,
         },
       },
@@ -233,6 +234,29 @@ router.get('/stats', async (req: Request, res: Response) => {
     const response: ApiResponse = {
       success: true,
       data: stats,
+      timestamp: new Date().toISOString(),
+    };
+
+    return res.json(response);
+  } catch (error) {
+    const response: ApiResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+    return res.status(500).json(response);
+  }
+});
+
+// Trigger immediate cache refresh
+router.post('/cache/refresh', async (req: Request, res: Response) => {
+  try {
+    const cacheService = SubgraphCacheService.getInstance();
+    await cacheService.forceRefresh();
+
+    const response: ApiResponse = {
+      success: true,
+      data: { message: 'Cache refresh triggered successfully' },
       timestamp: new Date().toISOString(),
     };
 

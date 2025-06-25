@@ -60,6 +60,11 @@ export class SubgraphCacheService {
     }
   }
 
+  public async forceRefresh(): Promise<void> {
+    console.log('🔄 Force refresh triggered');
+    await this.fetchAndCacheData();
+  }
+
   private async fetchAndCacheData(): Promise<void> {
     if (this.isRunning) {
       console.log('⏳ Cache update already in progress, skipping...');
@@ -250,9 +255,17 @@ export class SubgraphCacheService {
     return User.find().sort({ totalVolumeTraded: -1 }).limit(limit).skip(offset).lean();
   }
 
-  public async getCachedDebtPositions(limit = 100, offset = 0, owner?: string): Promise<any[]> {
+  public async getCachedDebtPositions(
+    limit = 100,
+    offset = 0,
+    owner?: string,
+  ): Promise<{ positions: any[]; total: number }> {
     const filter = owner ? { owner } : {};
-    return DebtPosition.find(filter).sort({ updatedAt: -1 }).limit(limit).skip(offset).lean();
+    const [positions, total] = await Promise.all([
+      DebtPosition.find(filter).sort({ updatedAt: -1 }).limit(limit).skip(offset).lean(),
+      DebtPosition.countDocuments(filter),
+    ]);
+    return { positions, total };
   }
 
   public async getCachedOrders(limit = 100, offset = 0, filters?: any): Promise<any[]> {
