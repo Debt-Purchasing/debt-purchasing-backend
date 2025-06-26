@@ -1,59 +1,66 @@
-import compression from 'compression';
-import cors from 'cors';
-import express from 'express';
-import morgan from 'morgan';
-import { config } from './config';
-import apiRoutes from './routes';
-import SubgraphCacheService from './services/cache';
-import DatabaseService from './services/database';
+import compression from "compression";
+import cors from "cors";
+import express from "express";
+import morgan from "morgan";
+import { config } from "./config";
+import apiRoutes from "./routes";
+import SubgraphCacheService from "./services/cache";
+import DatabaseService from "./services/database";
 
 const app = express();
 
 // Middleware
-app.use(morgan('combined'));
+app.use(morgan("combined"));
 app.use(compression());
 app.use(
   cors({
     origin: config.cors.origins,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-  }),
+  })
 );
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Routes
-app.use('/api', apiRoutes);
+app.use("/api", apiRoutes);
 
 // Root endpoint
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: 'Debt Purchasing Backend API',
-    version: '1.0.0',
+    message: "Debt Purchasing Backend API",
+    version: "1.0.0",
     timestamp: new Date().toISOString(),
   });
 });
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use("*", (req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found',
+    error: "Endpoint not found",
     timestamp: new Date().toISOString(),
   });
 });
 
 // Error handler
-app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-    timestamp: new Date().toISOString(),
-  });
-});
+app.use(
+  (
+    error: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error("Unhandled error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+);
 
 // Graceful shutdown handler
 const gracefulShutdown = async (signal: string) => {
@@ -68,30 +75,34 @@ const gracefulShutdown = async (signal: string) => {
     const dbService = DatabaseService.getInstance();
     await dbService.disconnect();
 
-    console.log('✅ Graceful shutdown completed');
+    console.log("✅ Graceful shutdown completed");
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error during shutdown:', error);
+    console.error("❌ Error during shutdown:", error);
     process.exit(1);
   }
 };
 
 // Handle process signals
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 // Initialize and start server
 async function startServer() {
   try {
-    console.log('🚀 Starting Debt Purchasing Backend...');
+    console.log("🚀 Starting Debt Purchasing Backend...");
 
     // Connect to database (non-blocking in development)
     const dbService = DatabaseService.getInstance();
     try {
       await dbService.connect();
     } catch (error) {
-      console.log('⚠️  Database connection failed - continuing without database for development');
-      console.log('💡 To fix: Set up MongoDB or create a .env file with proper MONGODB_URI');
+      console.log(
+        "⚠️  Database connection failed - continuing without database for development"
+      );
+      console.log(
+        "💡 To fix: Set up MongoDB or create a .env file with proper MONGODB_URI"
+      );
     }
 
     // Start cache service
@@ -103,7 +114,7 @@ async function startServer() {
       console.log(`✅ Server running on port ${config.port}`);
       console.log(`🌍 Environment: ${config.nodeEnv}`);
       console.log(`📊 Cache interval: ${config.cache.intervalSeconds}s`);
-      console.log(`🔗 CORS origins: ${config.cors.origins.join(', ')}`);
+      console.log(`🔗 CORS origins: ${config.cors.origins.join(", ")}`);
       console.log(`\n🎯 API Endpoints:`);
       console.log(`   GET  /api/health       - Health check`);
       console.log(`   POST /api/subgraph     - GraphQL proxy`);
@@ -112,23 +123,30 @@ async function startServer() {
       console.log(`   GET  /api/orders       - Cached orders`);
       console.log(`   GET  /api/stats        - Cache statistics`);
       console.log(`   GET  /api/prices       - Cached prices`);
-      console.log(`   GET  /api/liquidation-thresholds - Cached liquidation thresholds`);
+      console.log(
+        `   GET  /api/liquidation-thresholds - Cached liquidation thresholds`
+      );
     });
 
     // Handle server errors
-    server.on('error', (error: any) => {
-      if (error.code === 'EADDRINUSE') {
+    server.on("error", (error: any) => {
+      if (error.code === "EADDRINUSE") {
         console.error(`❌ Port ${config.port} is already in use`);
       } else {
-        console.error('❌ Server error:', error);
+        console.error("❌ Server error:", error);
       }
       process.exit(1);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 }
 
-// Start the server
-startServer();
+// Start the server only if this file is run directly (not imported)
+if (require.main === module) {
+  startServer();
+}
+
+// Export app for testing
+export default app;

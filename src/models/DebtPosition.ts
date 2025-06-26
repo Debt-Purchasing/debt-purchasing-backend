@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema } from "mongoose";
 
 export interface ICollateral {
   id: string;
@@ -19,7 +19,6 @@ export interface IDebtPosition extends Document {
   nonce: string;
   collaterals: ICollateral[];
   debts: IDebt[];
-  healthFactor: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,7 +29,7 @@ const CollateralSchema = new Schema<ICollateral>(
     token: { type: String, required: true },
     amount: { type: String, required: true },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const DebtSchema = new Schema<IDebt>(
@@ -40,7 +39,7 @@ const DebtSchema = new Schema<IDebt>(
     amount: { type: String, required: true },
     interestRateMode: { type: String, required: true },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const DebtPositionSchema = new Schema<IDebtPosition>(
@@ -62,22 +61,19 @@ const DebtPositionSchema = new Schema<IDebtPosition>(
     },
     collaterals: [CollateralSchema],
     debts: [DebtSchema],
-    healthFactor: {
-      type: String,
-      required: true,
-      index: true,
-    },
   },
   {
     timestamps: true,
-    collection: 'debt_positions',
-  },
+    collection: "debt_positions",
+  }
 );
 
 // Indexes for better query performance
 DebtPositionSchema.index({ owner: 1, updatedAt: -1 });
-DebtPositionSchema.index({ healthFactor: 1 });
-DebtPositionSchema.index({ 'collaterals.token': 1 });
-DebtPositionSchema.index({ 'debts.token': 1 });
+DebtPositionSchema.index({ "collaterals.token": 1 });
+DebtPositionSchema.index({ "debts.token": 1 });
 
-export const DebtPosition = mongoose.model<IDebtPosition>('DebtPosition', DebtPositionSchema);
+export const DebtPosition = mongoose.model<IDebtPosition>(
+  "DebtPosition",
+  DebtPositionSchema
+);
