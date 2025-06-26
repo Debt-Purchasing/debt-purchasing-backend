@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { config } from '../config';
 import { AssetConfiguration } from '../models/AssetConfiguration';
 import { DebtPosition } from '../models/DebtPosition';
-import { Order } from '../models/Order';
+import { Order } from '../models/Order'; // Orders (both pending and executed)
 import { Token } from '../models/Token';
 import { User } from '../models/User';
 import { SubgraphAssetConfiguration, SubgraphDebtPosition, SubgraphOrder, SubgraphToken, SubgraphUser } from '../types';
@@ -148,7 +148,6 @@ export class SubgraphCacheService {
                 amount: debt.amount,
                 interestRateMode: debt.interestRateMode,
               })),
-              healthFactor: (position as any).healthFactor || '1.0', // Default health factor if not available
               lastUpdatedAt: position.lastUpdatedAt,
             },
           },
@@ -158,6 +157,11 @@ export class SubgraphCacheService {
 
       const result = await DebtPosition.bulkWrite(operations);
       console.log(`🏦 Debt positions cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+
+      // Cancel orders with old nonce for each updated debt position
+      for (const position of positions) {
+        await this.cancelOldOrdersForDebtPosition(position.id, parseInt(position.nonce));
+      }
     } catch (error) {
       console.error('❌ Failed to cache debt positions:', error);
     }
@@ -167,30 +171,135 @@ export class SubgraphCacheService {
     if (orderExecutions.length === 0) return;
 
     try {
-      const operations = orderExecutions.map(execution => ({
-        updateOne: {
-          filter: { id: execution.id },
-          update: {
-            $set: {
-              id: execution.id,
-              position: execution.position.id,
-              buyer: execution.buyer.id,
-              seller: execution.seller.id,
-              debtNonce: execution.debtNonce,
-              executionTime: new Date(parseInt(execution.executionTime) * 1000),
-              blockNumber: execution.blockNumber,
-              gasUsed: execution.gasUsed,
-              gasPriceGwei: execution.gasPriceGwei,
-            },
-          },
-          upsert: true,
-        },
-      }));
+      // Process each order execution to update debt positions and cancel old orders
+      for (const execution of orderExecutions) {
+        await this.processOrderExecution(execution);
+      }
 
-      const result = await Order.bulkWrite(operations);
-      console.log(`📋 Order executions cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+      console.log(`📋 Processed ${orderExecutions.length} order executions`);
     } catch (error) {
-      console.error('❌ Failed to cache order executions:', error);
+      console.error('❌ Failed to process order executions:', error);
+    }
+  }
+
+  /**
+   * Process order execution to:
+   * 1. Update debt position nonce
+   * 2. Cancel all orders with lower nonce
+   * 3. Mark executed order as EXECUTED if found
+   */
+  private async processOrderExecution(execution: SubgraphOrder): Promise<void> {
+    try {
+      const debtPositionId = execution.position.id;
+      const newNonce = parseInt(execution.debtNonce);
+      const executionTime = new Date(parseInt(execution.executionTime) * 1000);
+
+      console.log(`🔄 Processing order execution for debt ${debtPositionId}, new nonce: ${newNonce}`);
+
+      // 1. Update debt position nonce
+      const debtUpdateResult = await DebtPosition.updateOne(
+        { id: debtPositionId },
+        {
+          $set: {
+            nonce: execution.debtNonce,
+            lastUpdatedAt: executionTime,
+          },
+        },
+      );
+
+      if (debtUpdateResult.modifiedCount > 0) {
+        console.log(`✅ Updated debt position ${debtPositionId} nonce to ${newNonce}`);
+      }
+
+      // 2. Find orders to update (both execute and cancel)
+      const ordersToUpdate = await Order.find({
+        debtAddress: debtPositionId,
+        status: 'ACTIVE',
+      }).lean();
+
+      if (ordersToUpdate.length === 0) {
+        console.log(`ℹ️ No active orders found for debt ${debtPositionId}`);
+        return;
+      }
+
+      // 3. Prepare bulk operations
+      const bulkOps: any[] = [];
+
+      for (const order of ordersToUpdate) {
+        const isExecutedOrder = order.debtNonce === newNonce && order.seller === execution.seller.id;
+
+        if (isExecutedOrder) {
+          // Mark as executed
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: order._id },
+              update: {
+                $set: {
+                  status: 'EXECUTED',
+                  executedBy: execution.buyer.id,
+                  executedAt: executionTime,
+                  executionTxHash: execution.id,
+                  executionBlockNumber: execution.blockNumber,
+                  executionGasUsed: execution.gasUsed,
+                  executionGasPriceGwei: execution.gasPriceGwei,
+                  updatedAt: new Date(),
+                },
+              },
+            },
+          });
+        } else if (order.debtNonce < newNonce) {
+          // Cancel old nonce orders
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: order._id },
+              update: {
+                $set: {
+                  status: 'CANCELLED',
+                  updatedAt: new Date(),
+                },
+              },
+            },
+          });
+        }
+      }
+
+      // 4. Execute bulk operations
+      if (bulkOps.length > 0) {
+        const result = await Order.bulkWrite(bulkOps);
+        console.log(`📋 Orders updated for debt ${debtPositionId}: ${result.modifiedCount} modified`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to process order execution for ${execution.position.id}:`, error);
+    }
+  }
+
+  /**
+   * Cancel orders with old nonce when debt position nonce is updated
+   */
+  private async cancelOldOrdersForDebtPosition(debtPositionId: string, currentNonce: number): Promise<void> {
+    try {
+      // Cancel all active orders with nonce less than current nonce
+      const cancelResult = await Order.updateMany(
+        {
+          debtAddress: debtPositionId,
+          debtNonce: { $lt: currentNonce },
+          status: 'ACTIVE',
+        },
+        {
+          $set: {
+            status: 'CANCELLED',
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      if (cancelResult.modifiedCount > 0) {
+        console.log(
+          `🚫 Cancelled ${cancelResult.modifiedCount} orders for debt ${debtPositionId} with nonce < ${currentNonce}`,
+        );
+      }
+    } catch (error) {
+      console.error(`❌ Failed to cancel old orders for debt ${debtPositionId}:`, error);
     }
   }
 
@@ -269,8 +378,9 @@ export class SubgraphCacheService {
   }
 
   public async getCachedOrders(limit = 100, offset = 0, filters?: any): Promise<any[]> {
-    return Order.find(filters || {})
-      .sort({ createdAt: -1 })
+    // Return executed orders (status = EXECUTED)
+    return Order.find({ status: 'EXECUTED', ...filters })
+      .sort({ executedAt: -1 })
       .limit(limit)
       .skip(offset)
       .lean();
@@ -294,18 +404,21 @@ export class SubgraphCacheService {
   }
 
   public async getStats(): Promise<any> {
-    const [userCount, positionCount, orderCount, tokenCount, assetConfigCount] = await Promise.all([
-      User.countDocuments(),
-      DebtPosition.countDocuments(),
-      Order.countDocuments(),
-      Token.countDocuments(),
-      AssetConfiguration.countDocuments(),
-    ]);
+    const [userCount, positionCount, executedOrderCount, pendingOrderCount, tokenCount, assetConfigCount] =
+      await Promise.all([
+        User.countDocuments(),
+        DebtPosition.countDocuments(),
+        Order.countDocuments({ status: 'EXECUTED' }),
+        Order.countDocuments({ status: 'ACTIVE' }),
+        Token.countDocuments(),
+        AssetConfiguration.countDocuments(),
+      ]);
 
     return {
       users: userCount,
       positions: positionCount,
-      orders: orderCount,
+      executedOrders: executedOrderCount, // Orders that have been executed
+      pendingOrders: pendingOrderCount, // Orders waiting to be executed
       tokens: tokenCount,
       assetConfigurations: assetConfigCount,
       lastUpdate: new Date().toISOString(),

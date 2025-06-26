@@ -3,6 +3,8 @@ import SubgraphCacheService from '../services/cache';
 import DatabaseService from '../services/database';
 import SubgraphService from '../services/subgraph';
 import { ApiResponse, GraphQLQuery } from '../types';
+import { calculateHealthFactor } from '../utils/orderHelpers';
+import orderRoutes from './orderRoutes';
 
 const router = express.Router();
 
@@ -112,7 +114,7 @@ router.get('/users', async (req: Request, res: Response) => {
   }
 });
 
-// Get cached debt positions
+// Get cached debt positions with real-time health factors
 router.get('/positions', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 100;
@@ -122,14 +124,34 @@ router.get('/positions', async (req: Request, res: Response) => {
     const cacheService = SubgraphCacheService.getInstance();
     const { positions, total } = await cacheService.getCachedDebtPositions(limit, offset, owner);
 
+    // Calculate real-time health factor for each position
+    const positionsWithHealthFactor = await Promise.all(
+      positions.map(async position => {
+        try {
+          const healthFactor = await calculateHealthFactor(position.collaterals, position.debts);
+
+          return {
+            ...position,
+            healthFactor,
+          };
+        } catch (error) {
+          console.error(`Error calculating HF for position ${position.id}:`, error);
+          return {
+            ...position,
+            healthFactor: '1000000000000000000', // Default 1.0 HF on error
+          };
+        }
+      }),
+    );
+
     const response: ApiResponse = {
       success: true,
       data: {
-        positions,
+        positions: positionsWithHealthFactor,
         pagination: {
           limit,
           offset,
-          count: positions.length,
+          count: positionsWithHealthFactor.length,
           total,
           owner,
         },
@@ -148,8 +170,8 @@ router.get('/positions', async (req: Request, res: Response) => {
   }
 });
 
-// Get cached orders
-router.get('/orders', async (req: Request, res: Response) => {
+// Get cached orders from subgraph
+router.get('/cached-orders', async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 100;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -307,5 +329,8 @@ router.get('/liquidation-thresholds', async (req: Request, res: Response) => {
     return res.status(500).json(response);
   }
 });
+
+// Orders (signed orders stored in database)
+router.use('/orders', orderRoutes);
 
 export default router;
