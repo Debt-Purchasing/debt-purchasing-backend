@@ -581,17 +581,37 @@ export async function calculateHealthFactor(
         continue;
       }
 
-      // Convert amount from token units to USD value
-      // amount (wei) * price (USD per token) / 10^decimals = USD value
-      const amountBig = BigInt(collateral.amount);
-      const priceBig = BigInt(tokenData.priceUSD);
-      const thresholdBig = BigInt(liquidationThreshold);
-      const decimalsBig = BigInt(10 ** tokenData.decimals);
+      // Convert decimal amounts to BigInt for precise calculation
+      // collateral.amount is already in decimal format (e.g., "1.5000" for 1.5 ETH)
+      const amountStr = collateral.amount;
+      const amountDecimalPlaces = amountStr.includes(".")
+        ? amountStr.split(".")[1]?.length || 0
+        : 0;
+      const amountBig = BigInt(amountStr.replace(".", ""));
+      const amountScale = BigInt(10 ** amountDecimalPlaces);
 
-      // Weighted collateral = amount * price * liquidationThreshold / decimals
-      // liquidationThreshold is in basis points (10000 = 100%), so divide by 10000
+      // Convert decimal price to BigInt
+      const priceStr = tokenData.priceUSD;
+      const priceDecimalPlaces = priceStr.includes(".")
+        ? priceStr.split(".")[1]?.length || 0
+        : 0;
+      const priceBig = BigInt(priceStr.replace(".", ""));
+      const priceScale = BigInt(10 ** priceDecimalPlaces);
+
+      // Convert decimal liquidationThreshold to BigInt
+      // liquidationThreshold might be in decimal format (e.g., "0.41" = 41%)
+      const thresholdStr = liquidationThreshold;
+      const thresholdDecimalPlaces = thresholdStr.includes(".")
+        ? thresholdStr.split(".")[1]?.length || 0
+        : 0;
+      const thresholdBig = BigInt(thresholdStr.replace(".", ""));
+      const thresholdScale = BigInt(10 ** thresholdDecimalPlaces);
+
+      // Weighted collateral = amount * price * liquidationThreshold / (amountScale * priceScale * thresholdScale)
+      // liquidationThreshold is already in decimal format (e.g., 0.41 = 41%)
       const weightedValue =
-        (amountBig * priceBig * thresholdBig) / (decimalsBig * BigInt(10000));
+        (amountBig * priceBig * thresholdBig) /
+        (amountScale * priceScale * thresholdScale);
       totalWeightedCollateralValue += weightedValue;
     }
 
@@ -606,13 +626,25 @@ export async function calculateHealthFactor(
         continue;
       }
 
-      // Convert debt amount to USD value
-      const amountBig = BigInt(debt.amount);
-      const priceBig = BigInt(tokenData.priceUSD);
-      const decimalsBig = BigInt(10 ** tokenData.decimals);
+      // Convert decimal amounts to BigInt for precise calculation
+      // debt.amount is already in decimal format (e.g., "2.5000" for 2.5 ETH)
+      const amountStr = debt.amount;
+      const amountDecimalPlaces = amountStr.includes(".")
+        ? amountStr.split(".")[1]?.length || 0
+        : 0;
+      const amountBig = BigInt(amountStr.replace(".", ""));
+      const amountScale = BigInt(10 ** amountDecimalPlaces);
 
-      // Debt value = amount * price / decimals
-      const debtValue = (amountBig * priceBig) / decimalsBig;
+      // Convert decimal price to BigInt
+      const priceStr = tokenData.priceUSD;
+      const priceDecimalPlaces = priceStr.includes(".")
+        ? priceStr.split(".")[1]?.length || 0
+        : 0;
+      const priceBig = BigInt(priceStr.replace(".", ""));
+      const priceScale = BigInt(10 ** priceDecimalPlaces);
+
+      // Debt value = amount * price / (amountScale * priceScale)
+      const debtValue = (amountBig * priceBig) / (amountScale * priceScale);
       totalDebtValue += debtValue;
     }
 
