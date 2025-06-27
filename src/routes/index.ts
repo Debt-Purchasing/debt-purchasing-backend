@@ -330,6 +330,63 @@ router.get('/liquidation-thresholds', async (req: Request, res: Response) => {
   }
 });
 
+// Get specific debt position by address
+router.get('/positions/:address', async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    const cacheService = SubgraphCacheService.getInstance();
+    const { positions } = await cacheService.getCachedDebtPositions(1, 0, address);
+
+    if (positions.length === 0) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Debt position not found',
+        timestamp: new Date().toISOString(),
+      };
+      return res.status(404).json(response);
+    }
+
+    const position = positions[0];
+
+    // Calculate real-time health factor
+    try {
+      const healthFactor = await calculateHealthFactor(position.collaterals, position.debts);
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          ...position,
+          healthFactor,
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      return res.json(response);
+    } catch (error) {
+      console.error(`Error calculating HF for position ${address}:`, error);
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          ...position,
+          healthFactor: '1000000000000000000', // Default 1.0 HF on error
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      return res.json(response);
+    }
+  } catch (error) {
+    const response: ApiResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+    return res.status(500).json(response);
+  }
+});
+
 // Orders (signed orders stored in database)
 router.use('/orders', orderRoutes);
 

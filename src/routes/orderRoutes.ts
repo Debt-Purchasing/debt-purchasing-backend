@@ -1,16 +1,16 @@
-import express, { Request, Response } from "express";
-import { Order, IOrder } from "../models/Order";
-import { DebtPosition } from "../models/DebtPosition";
-import { ApiResponse } from "../types";
+import express, { Request, Response } from 'express';
+import { DebtPosition } from '../models/DebtPosition';
+import { IOrder, Order } from '../models/Order';
+import { ApiResponse } from '../types';
 import {
+  calculateHealthFactor,
+  canExecuteOrder,
   generateOrderId,
   validateFullSellOrder,
   validatePartialSellOrder,
   verifyFullSellOrderSignature,
   verifyPartialSellOrderSignature,
-  canExecuteOrder,
-  calculateHealthFactor,
-} from "../utils/orderHelpers";
+} from '../utils/orderHelpers';
 
 const router = express.Router();
 
@@ -22,44 +22,34 @@ async function getCurrentHealthFactor(debtAddress: string): Promise<string> {
     const debtPosition = await DebtPosition.findOne({ id: debtAddress }).lean();
 
     if (!debtPosition) {
-      if (process.env.NODE_ENV !== "test") {
+      if (process.env.NODE_ENV !== 'test') {
         console.warn(`Debt position not found: ${debtAddress}`);
       }
-      return "1000000000000000000"; // Default 1.0 HF
+      return '1000000000000000000'; // Default 1.0 HF
     }
 
     // Calculate real-time HF using current prices and asset configurations
-    const currentHF = await calculateHealthFactor(
-      debtPosition.collaterals,
-      debtPosition.debts
-    );
+    const currentHF = await calculateHealthFactor(debtPosition.collaterals, debtPosition.debts);
 
     return currentHF;
   } catch (error) {
     console.error(`Error getting current HF for ${debtAddress}:`, error);
-    return "1000000000000000000"; // Default 1.0 HF
+    return '1000000000000000000'; // Default 1.0 HF
   }
 }
 
 /**
  * POST /orders - Create a new off-chain order
  */
-router.post("/", async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
-    const {
-      orderType,
-      chainId,
-      contractAddress,
-      seller,
-      fullSellOrder,
-      partialSellOrder,
-    } = req.body;
+    const { orderType, chainId, contractAddress, seller, fullSellOrder, partialSellOrder } = req.body;
 
     // Basic validation
-    if (!orderType || !["FULL", "PARTIAL"].includes(orderType)) {
+    if (!orderType || !['FULL', 'PARTIAL'].includes(orderType)) {
       const response: ApiResponse = {
         success: false,
-        error: "Invalid order type. Must be FULL or PARTIAL",
+        error: 'Invalid order type. Must be FULL or PARTIAL',
         timestamp: new Date().toISOString(),
       };
       return res.status(400).json(response);
@@ -68,7 +58,7 @@ router.post("/", async (req: Request, res: Response) => {
     if (!chainId || !contractAddress || !seller) {
       const response: ApiResponse = {
         success: false,
-        error: "Missing required fields: chainId, contractAddress, seller",
+        error: 'Missing required fields: chainId, contractAddress, seller',
         timestamp: new Date().toISOString(),
       };
       return res.status(400).json(response);
@@ -77,11 +67,11 @@ router.post("/", async (req: Request, res: Response) => {
     let validationResult;
 
     // Validate order based on type and ensure mutual exclusivity
-    if (orderType === "FULL") {
+    if (orderType === 'FULL') {
       if (!fullSellOrder) {
         const response: ApiResponse = {
           success: false,
-          error: "Full sell order data required for FULL order type",
+          error: 'Full sell order data required for FULL order type',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
@@ -90,7 +80,7 @@ router.post("/", async (req: Request, res: Response) => {
       if (partialSellOrder) {
         const response: ApiResponse = {
           success: false,
-          error: "Partial sell order data must be null for FULL order type",
+          error: 'Partial sell order data must be null for FULL order type',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
@@ -100,34 +90,27 @@ router.post("/", async (req: Request, res: Response) => {
       if (!validationResult.valid) {
         const response: ApiResponse = {
           success: false,
-          error: `Invalid full sell order: ${validationResult.errors.join(
-            ", "
-          )}`,
+          error: `Invalid full sell order: ${validationResult.errors.join(', ')}`,
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
       }
 
       // Verify signature
-      const isValidSignature = verifyFullSellOrderSignature(
-        chainId,
-        contractAddress,
-        fullSellOrder,
-        seller
-      );
+      const isValidSignature = verifyFullSellOrderSignature(chainId, contractAddress, fullSellOrder, seller);
       if (!isValidSignature) {
         const response: ApiResponse = {
           success: false,
-          error: "Invalid signature",
+          error: 'Invalid signature',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
       }
-    } else if (orderType === "PARTIAL") {
+    } else if (orderType === 'PARTIAL') {
       if (!partialSellOrder) {
         const response: ApiResponse = {
           success: false,
-          error: "Partial sell order data required for PARTIAL order type",
+          error: 'Partial sell order data required for PARTIAL order type',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
@@ -136,7 +119,7 @@ router.post("/", async (req: Request, res: Response) => {
       if (fullSellOrder) {
         const response: ApiResponse = {
           success: false,
-          error: "Full sell order data must be null for PARTIAL order type",
+          error: 'Full sell order data must be null for PARTIAL order type',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
@@ -146,25 +129,18 @@ router.post("/", async (req: Request, res: Response) => {
       if (!validationResult.valid) {
         const response: ApiResponse = {
           success: false,
-          error: `Invalid partial sell order: ${validationResult.errors.join(
-            ", "
-          )}`,
+          error: `Invalid partial sell order: ${validationResult.errors.join(', ')}`,
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
       }
 
       // Verify signature
-      const isValidSignature = verifyPartialSellOrderSignature(
-        chainId,
-        contractAddress,
-        partialSellOrder!,
-        seller
-      );
+      const isValidSignature = verifyPartialSellOrderSignature(chainId, contractAddress, partialSellOrder!, seller);
       if (!isValidSignature) {
         const response: ApiResponse = {
           success: false,
-          error: "Invalid signature",
+          error: 'Invalid signature',
           timestamp: new Date().toISOString(),
         };
         return res.status(400).json(response);
@@ -173,14 +149,10 @@ router.post("/", async (req: Request, res: Response) => {
 
     // Check for duplicate orders
     const existingOrder = await Order.findOne({
-      debtAddress:
-        orderType === "FULL" ? fullSellOrder.debt : partialSellOrder!.debt,
-      debtNonce:
-        orderType === "FULL"
-          ? fullSellOrder.debtNonce
-          : partialSellOrder!.debtNonce,
+      debtAddress: orderType === 'FULL' ? fullSellOrder.debt : partialSellOrder!.debt,
+      debtNonce: orderType === 'FULL' ? fullSellOrder.debtNonce : partialSellOrder!.debtNonce,
       orderType,
-      status: "ACTIVE",
+      status: 'ACTIVE',
     });
 
     if (existingOrder) {
@@ -203,10 +175,10 @@ router.post("/", async (req: Request, res: Response) => {
       chainId,
       contractAddress,
       seller,
-      status: "ACTIVE",
+      status: 'ACTIVE',
     };
 
-    if (orderType === "FULL") {
+    if (orderType === 'FULL') {
       orderData.fullSellOrder = fullSellOrder;
     } else {
       orderData.partialSellOrder = partialSellOrder;
@@ -227,16 +199,16 @@ router.post("/", async (req: Request, res: Response) => {
         endTime: order.endTime,
         triggerHF: order.triggerHF,
         createdAt: order.createdAt,
-        message: "Order created successfully",
+        message: 'Order created successfully',
       },
       timestamp: new Date().toISOString(),
     };
     return res.status(201).json(response);
   } catch (error) {
-    console.error("Error creating order:", error);
+    console.error('Error creating order:', error);
     const response: ApiResponse = {
       success: false,
-      error: "Internal server error",
+      error: 'Internal server error',
       timestamp: new Date().toISOString(),
     };
     return res.status(500).json(response);
@@ -246,18 +218,18 @@ router.post("/", async (req: Request, res: Response) => {
 /**
  * GET /orders - Get orders with filtering and pagination
  */
-router.get("/", async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const {
       seller,
       debtAddress,
-      status = "ACTIVE",
+      status = 'ACTIVE',
       orderType,
       chainId,
       page = 1,
       limit = 20,
-      sortBy = "createdAt",
-      sortOrder = "desc",
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
     } = req.query;
 
     // Build filter query
@@ -276,7 +248,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     // Sort options
     const sortOptions: any = {};
-    sortOptions[sortBy as string] = sortOrder === "desc" ? -1 : 1;
+    sortOptions[sortBy as string] = sortOrder === 'desc' ? -1 : 1;
 
     // Execute query
     const [orders, total] = await Promise.all([
@@ -291,14 +263,15 @@ router.get("/", async (req: Request, res: Response) => {
 
     // Calculate canExecute status for each order with real-time HF
     const ordersWithExecuteStatus = await Promise.all(
-      orders.map(async (order) => {
+      orders.map(async order => {
         const currentHF = await getCurrentHealthFactor(order.debtAddress);
+        const fullDebtPosition = await DebtPosition.findOne({ id: order.debtAddress }).lean();
         const canExecuteStatus = canExecuteOrder(
           order.startTime,
           order.endTime,
           order.status,
           order.triggerHF,
-          currentHF
+          currentHF,
         );
 
         return {
@@ -311,11 +284,14 @@ router.get("/", async (req: Request, res: Response) => {
           startTime: order.startTime,
           endTime: order.endTime,
           triggerHF: order.triggerHF,
+          currentHF: currentHF,
+          fullSellOrder: order.fullSellOrder,
+          partialSellOrder: order.partialSellOrder,
           canExecute: canExecuteStatus,
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
         };
-      })
+      }),
     );
 
     const response: ApiResponse = {
@@ -335,10 +311,10 @@ router.get("/", async (req: Request, res: Response) => {
     };
     return res.json(response);
   } catch (error) {
-    console.error("Error fetching orders:", error);
+    console.error('Error fetching orders:', error);
     const response: ApiResponse = {
       success: false,
-      error: "Internal server error",
+      error: 'Internal server error',
       timestamp: new Date().toISOString(),
     };
     return res.status(500).json(response);
@@ -348,14 +324,14 @@ router.get("/", async (req: Request, res: Response) => {
 /**
  * GET /orders/active - Get orders that can be executed (within time window and not expired)
  */
-router.get("/active", async (req: Request, res: Response) => {
+router.get('/active', async (req: Request, res: Response) => {
   try {
     const { chainId, seller, debtAddress, orderType } = req.query;
     const now = new Date();
 
     // Build filter for active, executable orders
     const filter: any = {
-      status: "ACTIVE",
+      status: 'ACTIVE',
       startTime: { $lte: now },
       endTime: { $gte: now },
     };
@@ -365,21 +341,18 @@ router.get("/active", async (req: Request, res: Response) => {
     if (debtAddress) filter.debtAddress = debtAddress;
     if (orderType) filter.orderType = orderType;
 
-    const orders = await Order.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
+    const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(50).lean();
 
     // Calculate real execution status for each order including HF check
     const ordersWithRealExecuteStatus = await Promise.all(
-      orders.map(async (order) => {
+      orders.map(async order => {
         const currentHF = await getCurrentHealthFactor(order.debtAddress);
         const canExecuteStatus = canExecuteOrder(
           order.startTime,
           order.endTime,
           order.status,
           order.triggerHF,
-          currentHF
+          currentHF,
         );
 
         return {
@@ -397,13 +370,11 @@ router.get("/active", async (req: Request, res: Response) => {
           createdAt: order.createdAt,
           canExecute: canExecuteStatus,
         };
-      })
+      }),
     );
 
     // Filter to only return truly executable orders (HF check passed)
-    const executableOrders = ordersWithRealExecuteStatus.filter(
-      (order) => order.canExecute === "YES"
-    );
+    const executableOrders = ordersWithRealExecuteStatus.filter(order => order.canExecute === 'YES');
 
     const response: ApiResponse = {
       success: true,
@@ -415,10 +386,10 @@ router.get("/active", async (req: Request, res: Response) => {
     };
     return res.json(response);
   } catch (error) {
-    console.error("Error fetching active orders:", error);
+    console.error('Error fetching active orders:', error);
     const response: ApiResponse = {
       success: false,
-      error: "Internal server error",
+      error: 'Internal server error',
       timestamp: new Date().toISOString(),
     };
     return res.status(500).json(response);
@@ -428,7 +399,7 @@ router.get("/active", async (req: Request, res: Response) => {
 /**
  * GET /orders/:id - Get order by ID with full details
  */
-router.get("/:id", async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -437,7 +408,7 @@ router.get("/:id", async (req: Request, res: Response) => {
     if (!order) {
       const response: ApiResponse = {
         success: false,
-        error: "Order not found",
+        error: 'Order not found',
         timestamp: new Date().toISOString(),
       };
       return res.status(404).json(response);
@@ -445,13 +416,7 @@ router.get("/:id", async (req: Request, res: Response) => {
 
     // Get current Health Factor and check executability
     const currentHF = await getCurrentHealthFactor(order.debtAddress);
-    const canExecuteStatus = canExecuteOrder(
-      order.startTime,
-      order.endTime,
-      order.status,
-      order.triggerHF,
-      currentHF
-    );
+    const canExecuteStatus = canExecuteOrder(order.startTime, order.endTime, order.status, order.triggerHF, currentHF);
 
     const response: ApiResponse = {
       success: true,
@@ -463,10 +428,10 @@ router.get("/:id", async (req: Request, res: Response) => {
     };
     return res.json(response);
   } catch (error) {
-    console.error("Error fetching order:", error);
+    console.error('Error fetching order:', error);
     const response: ApiResponse = {
       success: false,
-      error: "Internal server error",
+      error: 'Internal server error',
       timestamp: new Date().toISOString(),
     };
     return res.status(500).json(response);
