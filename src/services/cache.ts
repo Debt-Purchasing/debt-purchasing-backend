@@ -1,12 +1,18 @@
-import cron from 'node-cron';
-import { config } from '../config';
-import { AssetConfiguration } from '../models/AssetConfiguration';
-import { DebtPosition } from '../models/DebtPosition';
-import { Order } from '../models/Order'; // Orders (both pending and executed)
-import { Token } from '../models/Token';
-import { User } from '../models/User';
-import { SubgraphAssetConfiguration, SubgraphDebtPosition, SubgraphOrder, SubgraphToken, SubgraphUser } from '../types';
-import SubgraphService from './subgraph';
+import cron from "node-cron";
+import { config } from "../config";
+import { AssetConfiguration } from "../models/AssetConfiguration";
+import { DebtPosition } from "../models/DebtPosition";
+import { Order } from "../models/Order"; // Orders (both pending and executed)
+import { Token } from "../models/Token";
+import { User } from "../models/User";
+import {
+  SubgraphAssetConfiguration,
+  SubgraphDebtPosition,
+  SubgraphOrder,
+  SubgraphToken,
+  SubgraphUser,
+} from "../types";
+import SubgraphService from "./subgraph";
 
 export class SubgraphCacheService {
   private static instance: SubgraphCacheService;
@@ -27,12 +33,12 @@ export class SubgraphCacheService {
 
   public async startCaching(): Promise<void> {
     if (!config.cache.enabled) {
-      console.log('🔄 Caching is disabled');
+      console.log("🔄 Caching is disabled");
       return;
     }
 
     if (this.cronJob) {
-      console.log('🔄 Caching is already running');
+      console.log("🔄 Caching is already running");
       return;
     }
 
@@ -41,7 +47,9 @@ export class SubgraphCacheService {
 
     // Schedule periodic caching
     const cronExpression = `*/${config.cache.intervalSeconds} * * * * *`;
-    console.log(`🕒 Starting cache service with interval: ${config.cache.intervalSeconds}s`);
+    console.log(
+      `🕒 Starting cache service with interval: ${config.cache.intervalSeconds}s`
+    );
 
     this.cronJob = cron.schedule(cronExpression, async () => {
       if (!this.isRunning) {
@@ -49,25 +57,25 @@ export class SubgraphCacheService {
       }
     });
 
-    console.log('✅ Cache service started successfully');
+    console.log("✅ Cache service started successfully");
   }
 
   public stopCaching(): void {
     if (this.cronJob) {
       this.cronJob.stop();
       this.cronJob = null;
-      console.log('🛑 Cache service stopped');
+      console.log("🛑 Cache service stopped");
     }
   }
 
   public async forceRefresh(): Promise<void> {
-    console.log('🔄 Force refresh triggered');
+    console.log("🔄 Force refresh triggered");
     await this.fetchAndCacheData();
   }
 
   private async fetchAndCacheData(): Promise<void> {
     if (this.isRunning) {
-      console.log('⏳ Cache update already in progress, skipping...');
+      console.log("⏳ Cache update already in progress, skipping...");
       return;
     }
 
@@ -75,23 +83,30 @@ export class SubgraphCacheService {
     const startTime = Date.now();
 
     try {
-      console.log('🔄 Starting cache update...');
+      console.log("🔄 Starting cache update...");
 
-      const { users, debtPositions, orders, priceTokens, liquidationThresholds } =
-        await this.subgraphService.fetchAllData();
+      const {
+        users,
+        debtPositions,
+        orders,
+        priceTokens,
+        liquidationThresholds,
+      } = await this.subgraphService.fetchAllData();
 
       await Promise.all([
         this.cacheUsers(users.data?.users || []),
         this.cacheDebtPositions(debtPositions.data?.debtPositions || []),
         this.cacheOrders(orders.data?.fullSaleOrderExecutions || []),
         this.cachePriceTokens(priceTokens.data?.tokens || []),
-        this.cacheLiquidationThresholds(liquidationThresholds.data?.assetConfigurations || []),
+        this.cacheLiquidationThresholds(
+          liquidationThresholds.data?.assetConfigurations || []
+        ),
       ]);
 
       const duration = Date.now() - startTime;
       console.log(`✅ Cache update completed in ${duration}ms`);
     } catch (error) {
-      console.error('❌ Cache update failed:', error);
+      console.error("❌ Cache update failed:", error);
     } finally {
       this.isRunning = false;
     }
@@ -101,7 +116,7 @@ export class SubgraphCacheService {
     if (users.length === 0) return;
 
     try {
-      const operations = users.map(user => ({
+      const operations = users.map((user) => ({
         updateOne: {
           filter: { id: user.id },
           update: {
@@ -117,17 +132,21 @@ export class SubgraphCacheService {
       }));
 
       const result = await User.bulkWrite(operations);
-      console.log(`👥 Users cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+      console.log(
+        `👥 Users cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`
+      );
     } catch (error) {
-      console.error('❌ Failed to cache users:', error);
+      console.error("❌ Failed to cache users:", error);
     }
   }
 
-  private async cacheDebtPositions(positions: SubgraphDebtPosition[]): Promise<void> {
+  private async cacheDebtPositions(
+    positions: SubgraphDebtPosition[]
+  ): Promise<void> {
     if (positions.length === 0) return;
 
     try {
-      const operations = positions.map(position => ({
+      const operations = positions.map((position) => ({
         updateOne: {
           filter: { id: position.id },
           update: {
@@ -136,18 +155,19 @@ export class SubgraphCacheService {
               owner: position.owner.id,
               nonce: position.nonce,
               // Transform collaterals to flatten token object
-              collaterals: position.collaterals.map(collateral => ({
+              collaterals: position.collaterals.map((collateral) => ({
                 id: collateral.id,
                 token: collateral.token.id, // Extract token address from object
                 amount: collateral.amount,
               })),
               // Transform debts to flatten token object
-              debts: position.debts.map(debt => ({
+              debts: position.debts.map((debt) => ({
                 id: debt.id,
                 token: debt.token.id, // Extract token address from object
                 amount: debt.amount,
                 interestRateMode: debt.interestRateMode,
               })),
+              createdAt: position.createdAt,
               lastUpdatedAt: position.lastUpdatedAt,
             },
           },
@@ -156,14 +176,19 @@ export class SubgraphCacheService {
       }));
 
       const result = await DebtPosition.bulkWrite(operations);
-      console.log(`🏦 Debt positions cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+      console.log(
+        `🏦 Debt positions cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`
+      );
 
       // Cancel orders with old nonce for each updated debt position
       for (const position of positions) {
-        await this.cancelOldOrdersForDebtPosition(position.id, parseInt(position.nonce));
+        await this.cancelOldOrdersForDebtPosition(
+          position.id,
+          parseInt(position.nonce)
+        );
       }
     } catch (error) {
-      console.error('❌ Failed to cache debt positions:', error);
+      console.error("❌ Failed to cache debt positions:", error);
     }
   }
 
@@ -178,7 +203,7 @@ export class SubgraphCacheService {
 
       console.log(`📋 Processed ${orderExecutions.length} order executions`);
     } catch (error) {
-      console.error('❌ Failed to process order executions:', error);
+      console.error("❌ Failed to process order executions:", error);
     }
   }
 
@@ -194,7 +219,9 @@ export class SubgraphCacheService {
       const newNonce = parseInt(execution.debtNonce);
       const executionTime = new Date(parseInt(execution.executionTime) * 1000);
 
-      console.log(`🔄 Processing order execution for debt ${debtPositionId}, new nonce: ${newNonce}`);
+      console.log(
+        `🔄 Processing order execution for debt ${debtPositionId}, new nonce: ${newNonce}`
+      );
 
       // 1. Update debt position nonce
       const debtUpdateResult = await DebtPosition.updateOne(
@@ -204,17 +231,19 @@ export class SubgraphCacheService {
             nonce: execution.debtNonce,
             lastUpdatedAt: executionTime,
           },
-        },
+        }
       );
 
       if (debtUpdateResult.modifiedCount > 0) {
-        console.log(`✅ Updated debt position ${debtPositionId} nonce to ${newNonce}`);
+        console.log(
+          `✅ Updated debt position ${debtPositionId} nonce to ${newNonce}`
+        );
       }
 
       // 2. Find orders to update (both execute and cancel)
       const ordersToUpdate = await Order.find({
         debtAddress: debtPositionId,
-        status: 'ACTIVE',
+        status: "ACTIVE",
       }).lean();
 
       if (ordersToUpdate.length === 0) {
@@ -226,7 +255,8 @@ export class SubgraphCacheService {
       const bulkOps: any[] = [];
 
       for (const order of ordersToUpdate) {
-        const isExecutedOrder = order.debtNonce === newNonce && order.seller === execution.seller.id;
+        const isExecutedOrder =
+          order.debtNonce === newNonce && order.seller === execution.seller.id;
 
         if (isExecutedOrder) {
           // Mark as executed
@@ -235,7 +265,7 @@ export class SubgraphCacheService {
               filter: { _id: order._id },
               update: {
                 $set: {
-                  status: 'EXECUTED',
+                  status: "EXECUTED",
                   executedBy: execution.buyer.id,
                   executedAt: executionTime,
                   executionTxHash: execution.id,
@@ -254,7 +284,7 @@ export class SubgraphCacheService {
               filter: { _id: order._id },
               update: {
                 $set: {
-                  status: 'CANCELLED',
+                  status: "CANCELLED",
                   updatedAt: new Date(),
                 },
               },
@@ -266,40 +296,51 @@ export class SubgraphCacheService {
       // 4. Execute bulk operations
       if (bulkOps.length > 0) {
         const result = await Order.bulkWrite(bulkOps);
-        console.log(`📋 Orders updated for debt ${debtPositionId}: ${result.modifiedCount} modified`);
+        console.log(
+          `📋 Orders updated for debt ${debtPositionId}: ${result.modifiedCount} modified`
+        );
       }
     } catch (error) {
-      console.error(`❌ Failed to process order execution for ${execution.position.id}:`, error);
+      console.error(
+        `❌ Failed to process order execution for ${execution.position.id}:`,
+        error
+      );
     }
   }
 
   /**
    * Cancel orders with old nonce when debt position nonce is updated
    */
-  private async cancelOldOrdersForDebtPosition(debtPositionId: string, currentNonce: number): Promise<void> {
+  private async cancelOldOrdersForDebtPosition(
+    debtPositionId: string,
+    currentNonce: number
+  ): Promise<void> {
     try {
       // Cancel all active orders with nonce less than current nonce
       const cancelResult = await Order.updateMany(
         {
           debtAddress: debtPositionId,
           debtNonce: { $lt: currentNonce },
-          status: 'ACTIVE',
+          status: "ACTIVE",
         },
         {
           $set: {
-            status: 'CANCELLED',
+            status: "CANCELLED",
             updatedAt: new Date(),
           },
-        },
+        }
       );
 
       if (cancelResult.modifiedCount > 0) {
         console.log(
-          `🚫 Cancelled ${cancelResult.modifiedCount} orders for debt ${debtPositionId} with nonce < ${currentNonce}`,
+          `🚫 Cancelled ${cancelResult.modifiedCount} orders for debt ${debtPositionId} with nonce < ${currentNonce}`
         );
       }
     } catch (error) {
-      console.error(`❌ Failed to cancel old orders for debt ${debtPositionId}:`, error);
+      console.error(
+        `❌ Failed to cancel old orders for debt ${debtPositionId}:`,
+        error
+      );
     }
   }
 
@@ -307,7 +348,7 @@ export class SubgraphCacheService {
     if (tokens.length === 0) return;
 
     try {
-      const operations = tokens.map(token => ({
+      const operations = tokens.map((token) => ({
         updateOne: {
           filter: { id: token.id },
           update: {
@@ -325,17 +366,21 @@ export class SubgraphCacheService {
       }));
 
       const result = await Token.bulkWrite(operations);
-      console.log(`💰 Price tokens cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+      console.log(
+        `💰 Price tokens cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`
+      );
     } catch (error) {
-      console.error('❌ Failed to cache price tokens:', error);
+      console.error("❌ Failed to cache price tokens:", error);
     }
   }
 
-  private async cacheLiquidationThresholds(assetConfigurations: SubgraphAssetConfiguration[]): Promise<void> {
+  private async cacheLiquidationThresholds(
+    assetConfigurations: SubgraphAssetConfiguration[]
+  ): Promise<void> {
     if (assetConfigurations.length === 0) return;
 
     try {
-      const operations = assetConfigurations.map(config => ({
+      const operations = assetConfigurations.map((config) => ({
         updateOne: {
           filter: { id: config.id },
           update: {
@@ -354,65 +399,97 @@ export class SubgraphCacheService {
       }));
 
       const result = await AssetConfiguration.bulkWrite(operations);
-      console.log(`⚙️ Asset configurations cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`);
+      console.log(
+        `⚙️ Asset configurations cached: ${result.upsertedCount} new, ${result.modifiedCount} updated`
+      );
     } catch (error) {
-      console.error('❌ Failed to cache asset configurations:', error);
+      console.error("❌ Failed to cache asset configurations:", error);
     }
   }
 
   public async getCachedUsers(limit = 100, offset = 0): Promise<any[]> {
-    return User.find().sort({ totalVolumeTraded: -1 }).limit(limit).skip(offset).lean();
+    return User.find()
+      .sort({ totalVolumeTraded: -1 })
+      .limit(limit)
+      .skip(offset)
+      .lean();
   }
 
   public async getCachedDebtPositions(
     limit = 100,
     offset = 0,
-    owner?: string,
+    owner?: string
   ): Promise<{ positions: any[]; total: number }> {
     const filter = owner ? { owner } : {};
     const [positions, total] = await Promise.all([
-      DebtPosition.find(filter).sort({ updatedAt: -1 }).limit(limit).skip(offset).lean(),
+      DebtPosition.find(filter)
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .skip(offset)
+        .lean(),
       DebtPosition.countDocuments(filter),
     ]);
     return { positions, total };
   }
 
-  public async getCachedOrders(limit = 100, offset = 0, filters?: any): Promise<any[]> {
+  public async getCachedOrders(
+    limit = 100,
+    offset = 0,
+    filters?: any
+  ): Promise<any[]> {
     // Return executed orders (status = EXECUTED)
-    return Order.find({ status: 'EXECUTED', ...filters })
+    return Order.find({ status: "EXECUTED", ...filters })
       .sort({ executedAt: -1 })
       .limit(limit)
       .skip(offset)
       .lean();
   }
 
-  public async getCachedPriceTokens(limit = 100, offset = 0, symbol?: string): Promise<any[]> {
+  public async getCachedPriceTokens(
+    limit = 100,
+    offset = 0,
+    symbol?: string
+  ): Promise<any[]> {
     const filter = symbol ? { symbol: symbol.toUpperCase() } : {};
-    return Token.find(filter).sort({ lastUpdatedAt: -1 }).limit(limit).skip(offset).lean();
+    return Token.find(filter)
+      .sort({ lastUpdatedAt: -1 })
+      .limit(limit)
+      .skip(offset)
+      .lean();
   }
 
   public async getCachedLiquidationThresholds(
     limit = 100,
     offset = 0,
     symbol?: string,
-    isActive?: boolean,
+    isActive?: boolean
   ): Promise<any[]> {
     const filter: any = {};
     if (symbol) filter.symbol = symbol.toUpperCase();
     if (isActive !== undefined) filter.isActive = isActive;
-    return AssetConfiguration.find(filter).sort({ lastUpdatedAt: -1 }).limit(limit).skip(offset).lean();
+    return AssetConfiguration.find(filter)
+      .sort({ lastUpdatedAt: -1 })
+      .limit(limit)
+      .skip(offset)
+      .lean();
   }
 
   public async getStats(): Promise<any> {
-    const [userCount, positionCount, executedOrderCount, pendingOrderCount, tokenCount, assetConfigCount] =
-      await Promise.all([
-        User.countDocuments(),
-        DebtPosition.countDocuments(),
-        Order.countDocuments({ status: 'EXECUTED' }),
-        Order.countDocuments({ status: 'ACTIVE' }),
-        Token.countDocuments(),
-        AssetConfiguration.countDocuments(),
-      ]);
+    const [
+      userCount,
+      positionCount,
+      executedOrderCount,
+      pendingOrderCount,
+      tokenCount,
+      assetConfigCount,
+    ] = await Promise.all([
+      User.countDocuments(),
+      DebtPosition.countDocuments(),
+      Order.countDocuments({ status: "EXECUTED" }),
+      Order.countDocuments({ status: "ACTIVE" }),
+      Token.countDocuments(),
+      AssetConfiguration.countDocuments(),
+    ]);
 
     return {
       users: userCount,

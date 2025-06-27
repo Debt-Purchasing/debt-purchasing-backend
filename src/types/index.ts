@@ -40,6 +40,7 @@ export interface SubgraphDebtPosition {
     amount: string;
     interestRateMode: string;
   }>;
+  createdAt: string;
   lastUpdatedAt: string;
 }
 
