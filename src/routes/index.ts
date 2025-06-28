@@ -1,9 +1,9 @@
 import express, { Request, Response } from 'express';
 import SubgraphCacheService from '../services/cache';
 import DatabaseService from '../services/database';
+import DebtPositionService from '../services/debtPositionService';
 import SubgraphService from '../services/subgraph';
 import { ApiResponse, GraphQLQuery } from '../types';
-import { calculateHealthFactor } from '../utils/orderHelpers';
 import orderRoutes from './orderRoutes';
 
 const router = express.Router();
@@ -121,37 +121,17 @@ router.get('/positions', async (req: Request, res: Response) => {
     const offset = parseInt(req.query.offset as string) || 0;
     const owner = req.query.owner as string;
 
-    const cacheService = SubgraphCacheService.getInstance();
-    const { positions, total } = await cacheService.getCachedDebtPositions(limit, offset, owner);
-
-    // Calculate real-time health factor for each position
-    const positionsWithHealthFactor = await Promise.all(
-      positions.map(async position => {
-        try {
-          const healthFactor = await calculateHealthFactor(position.collaterals, position.debts);
-
-          return {
-            ...position,
-            healthFactor,
-          };
-        } catch (error) {
-          console.error(`Error calculating HF for position ${position.id}:`, error);
-          return {
-            ...position,
-            healthFactor: '1000000000000000000', // Default 1.0 HF on error
-          };
-        }
-      }),
-    );
+    const debtPositionService = DebtPositionService.getInstance();
+    const { positions, total } = await debtPositionService.getDebtPositionsWithHealthFactor(limit, offset, owner);
 
     const response: ApiResponse = {
       success: true,
       data: {
-        positions: positionsWithHealthFactor,
+        positions,
         pagination: {
           limit,
           offset,
-          count: positionsWithHealthFactor.length,
+          count: positions.length,
           total,
           owner,
         },
@@ -335,10 +315,19 @@ router.get('/positions/:address', async (req: Request, res: Response) => {
   try {
     const { address } = req.params;
 
-    const cacheService = SubgraphCacheService.getInstance();
-    const { positions } = await cacheService.getCachedDebtPositions(1, 0, address);
+    if (!address) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Address parameter is required',
+        timestamp: new Date().toISOString(),
+      };
+      return res.status(400).json(response);
+    }
 
-    if (positions.length === 0) {
+    const debtPositionService = DebtPositionService.getInstance();
+    const position = await debtPositionService.getDebtPositionWithHealthFactor(address);
+
+    if (!position) {
       const response: ApiResponse = {
         success: false,
         error: 'Debt position not found',
@@ -347,36 +336,13 @@ router.get('/positions/:address', async (req: Request, res: Response) => {
       return res.status(404).json(response);
     }
 
-    const position = positions[0];
+    const response: ApiResponse = {
+      success: true,
+      data: position,
+      timestamp: new Date().toISOString(),
+    };
 
-    // Calculate real-time health factor
-    try {
-      const healthFactor = await calculateHealthFactor(position.collaterals, position.debts);
-
-      const response: ApiResponse = {
-        success: true,
-        data: {
-          ...position,
-          healthFactor,
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      return res.json(response);
-    } catch (error) {
-      console.error(`Error calculating HF for position ${address}:`, error);
-
-      const response: ApiResponse = {
-        success: true,
-        data: {
-          ...position,
-          healthFactor: '1000000000000000000', // Default 1.0 HF on error
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      return res.json(response);
-    }
+    return res.json(response);
   } catch (error) {
     const response: ApiResponse = {
       success: false,

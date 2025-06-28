@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
-import { DebtPosition } from '../models/DebtPosition';
 import { IOrder, Order } from '../models/Order';
+import DebtPositionService from '../services/debtPositionService';
 import { ApiResponse } from '../types';
 import {
-  calculateHealthFactor,
   canExecuteOrder,
   generateOrderId,
   validateFullSellOrder,
@@ -18,24 +17,8 @@ const router = express.Router();
  * Helper function to get current Health Factor for an order
  */
 async function getCurrentHealthFactor(debtAddress: string): Promise<string> {
-  try {
-    const debtPosition = await DebtPosition.findOne({ id: debtAddress }).lean();
-
-    if (!debtPosition) {
-      if (process.env.NODE_ENV !== 'test') {
-        console.warn(`Debt position not found: ${debtAddress}`);
-      }
-      return '1000000000000000000'; // Default 1.0 HF
-    }
-
-    // Calculate real-time HF using current prices and asset configurations
-    const currentHF = await calculateHealthFactor(debtPosition.collaterals, debtPosition.debts);
-
-    return currentHF;
-  } catch (error) {
-    console.error(`Error getting current HF for ${debtAddress}:`, error);
-    return '1000000000000000000'; // Default 1.0 HF
-  }
+  const debtPositionService = DebtPositionService.getInstance();
+  return await debtPositionService.getCurrentHealthFactor(debtAddress);
 }
 
 /**
@@ -261,11 +244,12 @@ router.get('/', async (req: Request, res: Response) => {
     const hasNext = pageNum < totalPages;
     const hasPrev = pageNum > 1;
 
-    // Calculate canExecute status for each order with real-time HF
+    // Calculate canExecute status for each order with real-time HF and include debt position data
+    const debtPositionService = DebtPositionService.getInstance();
     const ordersWithExecuteStatus = await Promise.all(
       orders.map(async order => {
         const currentHF = await getCurrentHealthFactor(order.debtAddress);
-        const fullDebtPosition = await DebtPosition.findOne({ id: order.debtAddress }).lean();
+        const debtPosition = await debtPositionService.getDebtPositionForOrder(order.debtAddress);
         const canExecuteStatus = canExecuteOrder(
           order.startTime,
           order.endTime,
@@ -288,6 +272,7 @@ router.get('/', async (req: Request, res: Response) => {
           fullSellOrder: order.fullSellOrder,
           partialSellOrder: order.partialSellOrder,
           canExecute: canExecuteStatus,
+          debtPosition: debtPosition, // Include debt position data
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
         };
@@ -343,10 +328,12 @@ router.get('/active', async (req: Request, res: Response) => {
 
     const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(50).lean();
 
-    // Calculate real execution status for each order including HF check
+    // Calculate real execution status for each order including HF check and debt position data
+    const debtPositionService = DebtPositionService.getInstance();
     const ordersWithRealExecuteStatus = await Promise.all(
       orders.map(async order => {
         const currentHF = await getCurrentHealthFactor(order.debtAddress);
+        const debtPosition = await debtPositionService.getDebtPositionForOrder(order.debtAddress);
         const canExecuteStatus = canExecuteOrder(
           order.startTime,
           order.endTime,
@@ -369,6 +356,7 @@ router.get('/active', async (req: Request, res: Response) => {
           partialSellOrder: order.partialSellOrder,
           createdAt: order.createdAt,
           canExecute: canExecuteStatus,
+          debtPosition: debtPosition, // Include debt position data
         };
       }),
     );
@@ -414,8 +402,10 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json(response);
     }
 
-    // Get current Health Factor and check executability
+    // Get current Health Factor, debt position data, and check executability
+    const debtPositionService = DebtPositionService.getInstance();
     const currentHF = await getCurrentHealthFactor(order.debtAddress);
+    const debtPosition = await debtPositionService.getDebtPositionForOrder(order.debtAddress);
     const canExecuteStatus = canExecuteOrder(order.startTime, order.endTime, order.status, order.triggerHF, currentHF);
 
     const response: ApiResponse = {
@@ -423,6 +413,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       data: {
         ...order,
         canExecute: canExecuteStatus,
+        debtPosition: debtPosition, // Include debt position data
       },
       timestamp: new Date().toISOString(),
     };
