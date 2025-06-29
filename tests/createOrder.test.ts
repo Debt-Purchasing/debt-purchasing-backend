@@ -10,8 +10,8 @@ import {
   TEST_WALLET,
   createValidFullSellOrder,
   createValidPartialSellOrder,
-  signFullSellOrder,
-  signPartialSellOrder,
+  signFullSellOrderEIP712,
+  signPartialSellOrderEIP712,
 } from "./testUtils";
 
 // Create Express app for testing
@@ -29,7 +29,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
     it("should create a valid full sell order with proper signature", async () => {
       // Arrange
       const orderData = createValidFullSellOrder();
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -76,7 +76,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
     it("should reject duplicate full sell order for same debt position", async () => {
       // Arrange - Create first order
       const orderData = createValidFullSellOrder();
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -190,7 +190,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
     it("should create a valid partial sell order with proper signature", async () => {
       // Arrange
       const orderData = createValidPartialSellOrder();
-      const signature = await signPartialSellOrder(
+      const signature = await signPartialSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -236,7 +236,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
     it("should reject duplicate partial sell order for same debt position", async () => {
       // Arrange - Create first order
       const orderData = createValidPartialSellOrder();
-      const signature = await signPartialSellOrder(
+      const signature = await signPartialSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -281,7 +281,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
         ...createValidFullSellOrder(),
         debt: debtAddress,
       };
-      const fullSignature = await signFullSellOrder(
+      const fullSignature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         fullOrderData,
@@ -304,7 +304,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
         ...createValidPartialSellOrder(),
         debt: debtAddress,
       };
-      const partialSignature = await signPartialSellOrder(
+      const partialSignature = await signPartialSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         partialOrderData,
@@ -380,7 +380,7 @@ describe("POST /api/orders - Create Order Full Flow", () => {
         endTime: pastTime,
       };
 
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,

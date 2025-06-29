@@ -4,8 +4,8 @@ import { Order } from "../src/models/Order";
 import {
   createValidFullSellOrder,
   createValidPartialSellOrder,
-  signFullSellOrder,
-  signPartialSellOrder,
+  signFullSellOrderEIP712,
+  signPartialSellOrderEIP712,
   TEST_WALLET,
   TEST_CONTRACT_ADDRESS,
   TEST_CHAIN_ID,
@@ -25,7 +25,7 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
     it("should update order status to EXECUTED when execution event is processed", async () => {
       // Arrange - Create an active order
       const orderData = createValidFullSellOrder();
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -78,7 +78,7 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
     it("should not return executed orders in active orders endpoint", async () => {
       // Arrange - Create and execute an order
       const orderData = createValidFullSellOrder();
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -126,14 +126,14 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
       const fullOrderData = createValidFullSellOrder();
       const partialOrderData = createValidPartialSellOrder();
 
-      const fullSignature = await signFullSellOrder(
+      const fullSignature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         fullOrderData,
         TEST_WALLET
       );
 
-      const partialSignature = await signPartialSellOrder(
+      const partialSignature = await signPartialSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         partialOrderData,
@@ -211,7 +211,7 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
       const orderData = createValidFullSellOrder();
       orderData.debtNonce = 0; // Current nonce
 
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -272,14 +272,14 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
       currentOrderData.debtNonce = 1; // Current nonce
       currentOrderData.debt = currentDebtAddress;
 
-      const oldSignature = await signFullSellOrder(
+      const oldSignature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         oldOrderData,
         TEST_WALLET
       );
 
-      const currentSignature = await signFullSellOrder(
+      const currentSignature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         currentOrderData,
@@ -361,7 +361,7 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
       orderData.startTime = nowTime - 1; // Started 1 second ago
       orderData.endTime = nowTime + 2; // Will expire in 2 seconds
 
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,
@@ -412,7 +412,7 @@ describe("Order Lifecycle - Execute & Cancel Simulation", () => {
     it("should track complete order lifecycle: ACTIVE → EXECUTED", async () => {
       // Arrange - Create order
       const orderData = createValidFullSellOrder();
-      const signature = await signFullSellOrder(
+      const signature = await signFullSellOrderEIP712(
         TEST_CHAIN_ID,
         TEST_CONTRACT_ADDRESS,
         orderData,

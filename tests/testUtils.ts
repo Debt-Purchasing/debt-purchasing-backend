@@ -51,7 +51,7 @@ export function createValidPartialSellOrder() {
   };
 }
 
-// Generate signature for full sell order (matching contract logic)
+// Generate signature for full sell order (matching updated contract EIP-712 logic)
 export async function signFullSellOrder(
   chainId: number,
   contractAddress: string,
@@ -70,6 +70,9 @@ export async function signFullSellOrder(
       "OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
     )
   );
+
+  // Create domain separator (same as contract)
+  const domainSeparator = createDomainSeparator(chainId, contractAddress);
 
   // Create title hash
   const titleHash = ethers.utils.keccak256(
@@ -101,14 +104,22 @@ export async function signFullSellOrder(
     )
   );
 
-  // Sign the struct hash directly (not EIP-712)
-  const signature = wallet._signingKey().signDigest(structHash);
+  // Create EIP-712 digest (matching contract)
+  const digest = ethers.utils.keccak256(
+    ethers.utils.solidityPack(
+      ["string", "bytes32", "bytes32"],
+      ["\x19\x01", domainSeparator, structHash]
+    )
+  );
+
+  // Sign the EIP-712 digest
+  const signature = wallet._signingKey().signDigest(digest);
   const { v, r, s } = signature;
 
   return { v, r, s };
 }
 
-// Generate signature for partial sell order (matching contract logic)
+// Generate signature for partial sell order (matching updated contract EIP-712 logic)
 export async function signPartialSellOrder(
   chainId: number,
   contractAddress: string,
@@ -127,6 +138,9 @@ export async function signPartialSellOrder(
       "OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
     )
   );
+
+  // Create domain separator (same as contract)
+  const domainSeparator = createDomainSeparator(chainId, contractAddress);
 
   // Create title hash
   const titleHash = ethers.utils.keccak256(
@@ -173,8 +187,196 @@ export async function signPartialSellOrder(
     )
   );
 
-  // Sign the struct hash directly (not EIP-712)
-  const signature = wallet._signingKey().signDigest(structHash);
+  // Create EIP-712 digest (matching contract)
+  const digest = ethers.utils.keccak256(
+    ethers.utils.solidityPack(
+      ["string", "bytes32", "bytes32"],
+      ["\x19\x01", domainSeparator, structHash]
+    )
+  );
+
+  // Sign the EIP-712 digest
+  const signature = wallet._signingKey().signDigest(digest);
+  const { v, r, s } = signature;
+
+  return { v, r, s };
+}
+
+// EIP-712 Domain constants
+const DOMAIN_TYPE_HASH = ethers.utils.keccak256(
+  ethers.utils.toUtf8Bytes(
+    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+  )
+);
+
+const DOMAIN_NAME = "AaveRouter";
+const DOMAIN_VERSION = "1";
+
+// Create EIP-712 Domain Separator
+function createDomainSeparator(
+  chainId: number,
+  contractAddress: string
+): string {
+  return ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["bytes32", "bytes32", "bytes32", "uint256", "address"],
+      [
+        DOMAIN_TYPE_HASH,
+        ethers.utils.keccak256(ethers.utils.toUtf8Bytes(DOMAIN_NAME)),
+        ethers.utils.keccak256(ethers.utils.toUtf8Bytes(DOMAIN_VERSION)),
+        chainId,
+        contractAddress,
+      ]
+    )
+  );
+}
+
+// Generate EIP-712 signature for full sell order
+export async function signFullSellOrderEIP712(
+  chainId: number,
+  contractAddress: string,
+  order: any,
+  wallet: ethers.Wallet
+) {
+  // Create type hashes (same as contract)
+  const FULL_SELL_ORDER_TYPE_HASH = ethers.utils.keccak256(
+    ethers.utils.toUtf8Bytes(
+      "FullSellOrder(uint256 chainId,address contract,OrderTitle title,address token,uint256 percentOfEquity)"
+    )
+  );
+
+  const ORDER_TITLE_TYPE_HASH = ethers.utils.keccak256(
+    ethers.utils.toUtf8Bytes(
+      "OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
+    )
+  );
+
+  // Create domain separator
+  const domainSeparator = createDomainSeparator(chainId, contractAddress);
+
+  // Create title hash
+  const titleHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
+      [
+        ORDER_TITLE_TYPE_HASH,
+        order.debt,
+        order.debtNonce,
+        order.startTime,
+        order.endTime,
+        order.triggerHF,
+      ]
+    )
+  );
+
+  // Create struct hash
+  const structHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["bytes32", "uint256", "address", "bytes32", "address", "uint256"],
+      [
+        FULL_SELL_ORDER_TYPE_HASH,
+        chainId,
+        contractAddress,
+        titleHash,
+        order.token,
+        order.percentOfEquity,
+      ]
+    )
+  );
+
+  // Create EIP-712 digest
+  const eip712Hash = ethers.utils.keccak256(
+    ethers.utils.solidityPack(
+      ["string", "bytes32", "bytes32"],
+      ["\x19\x01", domainSeparator, structHash]
+    )
+  );
+
+  // Sign the EIP-712 hash
+  const signature = wallet._signingKey().signDigest(eip712Hash);
+  const { v, r, s } = signature;
+
+  return { v, r, s };
+}
+
+// Generate EIP-712 signature for partial sell order
+export async function signPartialSellOrderEIP712(
+  chainId: number,
+  contractAddress: string,
+  order: any,
+  wallet: ethers.Wallet
+) {
+  // Create type hashes (same as contract)
+  const PARTIAL_SELL_ORDER_TYPE_HASH = ethers.utils.keccak256(
+    ethers.utils.toUtf8Bytes(
+      "PartialSellOrder(uint256 chainId,address contract,OrderTitle title,uint256 interestRateMode,address[] collateralOut,uint256[] percents,address repayToken,uint256 repayAmount,uint256 bonus)"
+    )
+  );
+
+  const ORDER_TITLE_TYPE_HASH = ethers.utils.keccak256(
+    ethers.utils.toUtf8Bytes(
+      "OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
+    )
+  );
+
+  // Create domain separator
+  const domainSeparator = createDomainSeparator(chainId, contractAddress);
+
+  // Create title hash
+  const titleHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
+      [
+        ORDER_TITLE_TYPE_HASH,
+        order.debt,
+        order.debtNonce,
+        order.startTime,
+        order.endTime,
+        order.triggerHF,
+      ]
+    )
+  );
+
+  // Create struct hash
+  const structHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      [
+        "bytes32",
+        "uint256",
+        "address",
+        "bytes32",
+        "uint256",
+        "address[]",
+        "uint256[]",
+        "address",
+        "uint256",
+        "uint256",
+      ],
+      [
+        PARTIAL_SELL_ORDER_TYPE_HASH,
+        chainId,
+        contractAddress,
+        titleHash,
+        order.interestRateMode,
+        order.collateralOut,
+        order.percents,
+        order.repayToken,
+        order.repayAmount,
+        order.bonus,
+      ]
+    )
+  );
+
+  // Create EIP-712 digest
+  const eip712Hash = ethers.utils.keccak256(
+    ethers.utils.solidityPack(
+      ["string", "bytes32", "bytes32"],
+      ["\x19\x01", domainSeparator, structHash]
+    )
+  );
+
+  // Sign the EIP-712 hash
+  const signature = wallet._signingKey().signDigest(eip712Hash);
   const { v, r, s } = signature;
 
   return { v, r, s };
