@@ -141,9 +141,8 @@ export function verifyFullSellOrderSignature(
       s: order.s,
     };
 
-    // Use hashMessage to handle Ethereum message prefix (frontend uses signMessage)
-    const messageHash = ethers.utils.hashMessage(ethers.utils.arrayify(structHash));
-    const recoveredAddress = ethers.utils.recoverAddress(messageHash, signature);
+    // Use raw hash recovery (matching contract's ECDSA.recover expectation - no message prefix)
+    const recoveredAddress = ethers.utils.recoverAddress(structHash, signature);
     return recoveredAddress.toLowerCase() === expectedSigner.toLowerCase();
   } catch (error) {
     return false;
@@ -218,9 +217,8 @@ export function verifyPartialSellOrderSignature(
       s: order.s,
     };
 
-    // Use hashMessage to handle Ethereum message prefix (frontend uses signMessage)
-    const messageHash = ethers.utils.hashMessage(ethers.utils.arrayify(structHash));
-    const recoveredAddress = ethers.utils.recoverAddress(messageHash, signature);
+    // Use raw hash recovery (matching contract's ECDSA.recover expectation - no message prefix)
+    const recoveredAddress = ethers.utils.recoverAddress(structHash, signature);
     return recoveredAddress.toLowerCase() === expectedSigner.toLowerCase();
   } catch (error) {
     return false;
