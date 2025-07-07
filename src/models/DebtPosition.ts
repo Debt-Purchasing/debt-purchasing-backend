@@ -3,20 +3,26 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ICollateral {
   id: string;
   token: string;
+  symbol: string;
+  decimals: number;
   amount: string;
+  lastUpdatedAt: Date;
 }
 
 export interface IDebt {
   id: string;
   token: string;
+  symbol: string;
+  decimals: number;
   amount: string;
   interestRateMode: string;
+  lastUpdatedAt: Date;
 }
 
 export interface IDebtPosition extends Document {
   id: string;
   owner: string;
-  nonce: string;
+  nonce: number;
   collaterals: ICollateral[];
   debts: IDebt[];
   createdAt: Date;
@@ -27,7 +33,10 @@ const CollateralSchema = new Schema<ICollateral>(
   {
     id: { type: String, required: true },
     token: { type: String, required: true },
+    symbol: { type: String, required: true },
+    decimals: { type: Number, required: true },
     amount: { type: String, required: true },
+    lastUpdatedAt: { type: Date, required: true, default: Date.now },
   },
   { _id: false }
 );
@@ -36,8 +45,11 @@ const DebtSchema = new Schema<IDebt>(
   {
     id: { type: String, required: true },
     token: { type: String, required: true },
+    symbol: { type: String, required: true },
+    decimals: { type: Number, required: true },
     amount: { type: String, required: true },
     interestRateMode: { type: String, required: true },
+    lastUpdatedAt: { type: Date, required: true, default: Date.now },
   },
   { _id: false }
 );
@@ -56,11 +68,22 @@ const DebtPositionSchema = new Schema<IDebtPosition>(
       index: true,
     },
     nonce: {
-      type: String,
+      type: Number,
       required: true,
+      default: 0,
     },
     collaterals: [CollateralSchema],
     debts: [DebtSchema],
+    createdAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
   },
   {
     timestamps: true,

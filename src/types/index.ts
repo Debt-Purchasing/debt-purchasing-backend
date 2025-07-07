@@ -1,11 +1,3 @@
-// User entity from subgraph
-export interface SubgraphUser {
-  id: string;
-  totalPositions: string;
-  totalOrdersExecuted: string;
-  totalVolumeTraded: string;
-}
-
 // Token entity from subgraph
 export interface SubgraphToken {
   id: string;
@@ -16,18 +8,27 @@ export interface SubgraphToken {
   lastUpdatedAt: string;
 }
 
+// User entity from subgraph
+export interface SubgraphUser {
+  id: string;
+  nonce: string;
+  totalPositions: string;
+  totalOrdersExecuted: string;
+  totalVolumeUSD: string;
+  lastUpdatedAt: string;
+}
+
 // Debt position entity from subgraph
 export interface SubgraphDebtPosition {
   id: string;
-  owner: {
-    id: string;
-  };
+  owner: string;
   nonce: string;
   collaterals: Array<{
     id: string;
     token: {
       id: string;
       symbol: string;
+      decimals: number;
     };
     amount: string;
   }>;
@@ -36,6 +37,7 @@ export interface SubgraphDebtPosition {
     token: {
       id: string;
       symbol: string;
+      decimals: number;
     };
     amount: string;
     interestRateMode: string;
@@ -45,22 +47,20 @@ export interface SubgraphDebtPosition {
 }
 
 // Order execution entity from subgraph (orders are off-chain)
-export interface SubgraphOrder {
+export interface SubgraphFullOrder {
   id: string;
-  position: {
-    id: string;
-  };
-  buyer: {
-    id: string;
-  };
-  seller: {
-    id: string;
-  };
-  debtNonce: string;
-  executionTime: string;
+  titleHash: string;
+  buyer: string;
+  blockTimestamp: string;
   blockNumber: string;
-  gasUsed: string;
-  gasPriceGwei: string;
+}
+
+export interface SubgraphPartialOrder {
+  id: string;
+  titleHash: string;
+  buyer: string;
+  blockTimestamp: string;
+  blockNumber: string;
 }
 
 // Asset configuration entity from subgraph

@@ -8,7 +8,8 @@ import { User } from "../models/User";
 import {
   SubgraphAssetConfiguration,
   SubgraphDebtPosition,
-  SubgraphOrder,
+  SubgraphFullOrder,
+  SubgraphPartialOrder,
   SubgraphToken,
   SubgraphUser,
 } from "../types";
@@ -88,7 +89,8 @@ export class SubgraphCacheService {
       const {
         users,
         debtPositions,
-        orders,
+        fullOrderExecutions,
+        partialOrderExecutions,
         priceTokens,
         liquidationThresholds,
       } = await this.subgraphService.fetchAllData();
@@ -96,7 +98,12 @@ export class SubgraphCacheService {
       await Promise.all([
         this.cacheUsers(users.data?.users || []),
         this.cacheDebtPositions(debtPositions.data?.debtPositions || []),
-        this.cacheOrders(orders.data?.fullSaleOrderExecutions || []),
+        this.cacheFullOrders(
+          fullOrderExecutions.data?.fullOrderExecutions || []
+        ),
+        this.cachePartialOrders(
+          partialOrderExecutions.data?.partialOrderExecutions || []
+        ),
         this.cachePriceTokens(priceTokens.data?.tokens || []),
         this.cacheLiquidationThresholds(
           liquidationThresholds.data?.assetConfigurations || []
@@ -113,8 +120,6 @@ export class SubgraphCacheService {
   }
 
   private async cacheUsers(users: SubgraphUser[]): Promise<void> {
-    if (users.length === 0) return;
-
     try {
       const operations = users.map((user) => ({
         updateOne: {
@@ -122,9 +127,11 @@ export class SubgraphCacheService {
           update: {
             $set: {
               id: user.id,
+              nonce: user.nonce,
               totalPositions: user.totalPositions,
               totalOrdersExecuted: user.totalOrdersExecuted,
-              totalVolumeTraded: user.totalVolumeTraded,
+              totalVolumeUSD: user.totalVolumeUSD,
+              lastUpdatedAt: user.lastUpdatedAt,
             },
           },
           upsert: true,
@@ -152,18 +159,22 @@ export class SubgraphCacheService {
           update: {
             $set: {
               id: position.id,
-              owner: position.owner.id,
+              owner: position.owner,
               nonce: position.nonce,
               // Transform collaterals to flatten token object
               collaterals: position.collaterals.map((collateral) => ({
                 id: collateral.id,
                 token: collateral.token.id, // Extract token address from object
+                symbol: collateral.token.symbol,
+                decimals: collateral.token.decimals,
                 amount: collateral.amount,
               })),
               // Transform debts to flatten token object
               debts: position.debts.map((debt) => ({
                 id: debt.id,
                 token: debt.token.id, // Extract token address from object
+                symbol: debt.token.symbol,
+                decimals: debt.token.decimals,
                 amount: debt.amount,
                 interestRateMode: debt.interestRateMode,
               })),
@@ -192,16 +203,31 @@ export class SubgraphCacheService {
     }
   }
 
-  private async cacheOrders(orderExecutions: SubgraphOrder[]): Promise<void> {
+  private async cacheFullOrders(
+    orderExecutions: SubgraphFullOrder[]
+  ): Promise<void> {
     if (orderExecutions.length === 0) return;
 
     try {
       // Process each order execution to update debt positions and cancel old orders
       for (const execution of orderExecutions) {
-        await this.processOrderExecution(execution);
+        await this.processFullOrderExecution(execution);
       }
+    } catch (error) {
+      console.error("❌ Failed to process order executions:", error);
+    }
+  }
 
-      console.log(`📋 Processed ${orderExecutions.length} order executions`);
+  private async cachePartialOrders(
+    orderExecutions: SubgraphPartialOrder[]
+  ): Promise<void> {
+    if (orderExecutions.length === 0) return;
+
+    try {
+      // Process each order execution to update debt positions and cancel old orders
+      for (const execution of orderExecutions) {
+        await this.processPartialOrderExecution(execution);
+      }
     } catch (error) {
       console.error("❌ Failed to process order executions:", error);
     }
@@ -213,96 +239,90 @@ export class SubgraphCacheService {
    * 2. Cancel all orders with lower nonce
    * 3. Mark executed order as EXECUTED if found
    */
-  private async processOrderExecution(execution: SubgraphOrder): Promise<void> {
+  private async processFullOrderExecution(
+    execution: SubgraphFullOrder
+  ): Promise<void> {
     try {
-      const debtPositionId = execution.position.id;
-      const newNonce = parseInt(execution.debtNonce);
-      const executionTime = new Date(parseInt(execution.executionTime) * 1000);
+      const order = await Order.findOne({
+        titleHash: execution.titleHash,
+        orderType: "FULL",
+      });
+      const debtPositionId = order?.debtAddress || "";
+      const newNonce = (order?.debtNonce || 0) + 1;
+      const executionTime = new Date(parseInt(execution.blockTimestamp) * 1000);
 
       console.log(
         `🔄 Processing order execution for debt ${debtPositionId}, new nonce: ${newNonce}`
       );
 
-      // 1. Update debt position nonce
-      const debtUpdateResult = await DebtPosition.updateOne(
+      await DebtPosition.updateOne(
         { id: debtPositionId },
         {
           $set: {
-            nonce: execution.debtNonce,
+            nonce: newNonce,
+            owner: execution.buyer,
             lastUpdatedAt: executionTime,
           },
         }
       );
 
-      if (debtUpdateResult.modifiedCount > 0) {
-        console.log(
-          `✅ Updated debt position ${debtPositionId} nonce to ${newNonce}`
-        );
-      }
-
-      // 2. Find orders to update (both execute and cancel)
-      const ordersToUpdate = await Order.find({
-        debtAddress: debtPositionId,
-        status: "ACTIVE",
-      }).lean();
-
-      if (ordersToUpdate.length === 0) {
-        console.log(`ℹ️ No active orders found for debt ${debtPositionId}`);
-        return;
-      }
-
-      // 3. Prepare bulk operations
-      const bulkOps: any[] = [];
-
-      for (const order of ordersToUpdate) {
-        const isExecutedOrder =
-          order.debtNonce === newNonce && order.seller === execution.seller.id;
-
-        if (isExecutedOrder) {
-          // Mark as executed
-          bulkOps.push({
-            updateOne: {
-              filter: { _id: order._id },
-              update: {
-                $set: {
-                  status: "EXECUTED",
-                  executedBy: execution.buyer.id,
-                  executedAt: executionTime,
-                  executionTxHash: execution.id,
-                  executionBlockNumber: execution.blockNumber,
-                  executionGasUsed: execution.gasUsed,
-                  executionGasPriceGwei: execution.gasPriceGwei,
-                  updatedAt: new Date(),
-                },
-              },
-            },
-          });
-        } else if (order.debtNonce < newNonce) {
-          // Cancel old nonce orders
-          bulkOps.push({
-            updateOne: {
-              filter: { _id: order._id },
-              update: {
-                $set: {
-                  status: "CANCELLED",
-                  updatedAt: new Date(),
-                },
-              },
-            },
-          });
+      await Order.updateOne(
+        { id: execution.titleHash, orderType: "FULL" },
+        {
+          $set: {
+            status: "EXECUTED",
+            buyer: execution.buyer,
+            blockNumber: execution.blockNumber,
+            txHash: execution.id,
+            updatedAt: executionTime,
+          },
         }
-      }
-
-      // 4. Execute bulk operations
-      if (bulkOps.length > 0) {
-        const result = await Order.bulkWrite(bulkOps);
-        console.log(
-          `📋 Orders updated for debt ${debtPositionId}: ${result.modifiedCount} modified`
-        );
-      }
+      );
     } catch (error) {
       console.error(
-        `❌ Failed to process order execution for ${execution.position.id}:`,
+        `❌ Failed to process order execution for ${execution.titleHash}:`,
+        error
+      );
+    }
+  }
+
+  private async processPartialOrderExecution(
+    execution: SubgraphPartialOrder
+  ): Promise<void> {
+    try {
+      const order = await Order.findOne({
+        titleHash: execution.titleHash,
+        orderType: "PARTIAL",
+      });
+      const debtPositionId = order?.debtAddress || "";
+      const newNonce = (order?.debtNonce || 0) + 1;
+      const executionTime = new Date(parseInt(execution.blockTimestamp) * 1000);
+
+      await DebtPosition.updateOne(
+        { id: debtPositionId },
+        {
+          $set: {
+            nonce: newNonce,
+            lastUpdatedAt: executionTime,
+          },
+        }
+      );
+
+      await Order.updateOne(
+        { titleHash: execution.titleHash, orderType: "PARTIAL" },
+        {
+          $set: {
+            status: "EXECUTED",
+            buyer: execution.buyer,
+            blockNumber: execution.blockNumber,
+            txHash: execution.id,
+            updatedAt: executionTime,
+          },
+        }
+      );
+    } catch (error) {
+      console.error(
+        `❌ Failed to process order execution for ${execution.titleHash}:`,
         error
       );
     }
@@ -409,7 +429,7 @@ export class SubgraphCacheService {
 
   public async getCachedUsers(limit = 100, offset = 0): Promise<any[]> {
     return User.find()
-      .sort({ totalVolumeTraded: -1 })
+      .sort({ totalVolumeUSD: -1 })
       .limit(limit)
       .skip(offset)
       .lean();

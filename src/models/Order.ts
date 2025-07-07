@@ -26,8 +26,7 @@ export interface IPartialSellOrder {
   triggerHF: string;
   // Partial sell specific fields
   interestRateMode: number; // 1 for stable, 2 for variable
-  collateralOut: string[];
-  percents: string[]; // Array of percentages as strings
+  collateralOut: string;
   repayToken: string;
   repayAmount: string;
   bonus: string; // Bonus percentage as string
@@ -52,12 +51,9 @@ export interface IOrder extends Document {
   status: "ACTIVE" | "EXECUTED" | "CANCELLED" | "EXPIRED";
 
   // Execution details (populated when order gets executed on-chain)
-  executedBy?: string; // Buyer address when executed
-  executedAt?: Date; // When the order was executed on-chain (from subgraph)
-  executionTxHash?: string; // Transaction hash of execution
-  executionBlockNumber?: string; // Block number of execution
-  executionGasUsed?: string; // Gas used for execution
-  executionGasPriceGwei?: string; // Gas price in Gwei
+  buyer?: string; // Buyer address when executed
+  blockNumber?: string; // Block number of execution
+  txHash?: string; // Transaction hash of execution
 
   // Cancellation details
   cancelledAt?: Date; // When the order was cancelled
@@ -170,20 +166,11 @@ const PartialSellOrderSchema = new Schema(
       required: true,
       enum: [1, 2], // 1 for stable, 2 for variable
     },
-    collateralOut: [
-      {
-        type: String,
-        required: true,
-        match: /^0x[a-fA-F0-9]{40}$/, // Ethereum address validation
-      },
-    ],
-    percents: [
-      {
-        type: String,
-        required: true,
-        match: /^\d+$/, // Only digits for BigNumber string
-      },
-    ],
+    collateralOut: {
+      type: String,
+      required: true,
+      match: /^0x[a-fA-F0-9]{40}$/, // Ethereum address validation
+    },
     repayToken: {
       type: String,
       required: true,
@@ -276,28 +263,18 @@ const OrderSchema = new Schema<IOrder>(
     },
 
     // Execution details
-    executedBy: {
+    buyer: {
       type: String,
       match: /^0x[a-fA-F0-9]{40}$/, // Ethereum address validation
       index: true,
     },
-    executedAt: {
-      type: Date,
-      index: true,
-    },
-    executionTxHash: {
+    txHash: {
       type: String,
       match: /^0x[a-fA-F0-9]{64}$/, // Transaction hash validation
     },
-    executionBlockNumber: {
+    blockNumber: {
       type: String,
       index: true,
-    },
-    executionGasUsed: {
-      type: String,
-    },
-    executionGasPriceGwei: {
-      type: String,
     },
 
     // Cancellation details

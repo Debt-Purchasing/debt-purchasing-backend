@@ -1,10 +1,11 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema } from "mongoose";
 
 export interface IUser extends Document {
   id: string;
+  nonce: string;
   totalPositions: string;
   totalOrdersExecuted: string;
-  totalVolumeTraded: string;
+  totalVolumeUSD: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -17,31 +18,45 @@ const UserSchema = new Schema<IUser>(
       unique: true,
       index: true,
     },
+    nonce: {
+      type: String,
+      required: true,
+      default: "0",
+    },
     totalPositions: {
       type: String,
       required: true,
-      default: '0',
+      default: "0",
     },
     totalOrdersExecuted: {
       type: String,
       required: true,
-      default: '0',
+      default: "0",
     },
-    totalVolumeTraded: {
+    totalVolumeUSD: {
       type: String,
       required: true,
-      default: '0',
+      default: "0",
+    },
+    createdAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
     },
   },
   {
     timestamps: true,
-    collection: 'users',
-  },
+    collection: "users",
+  }
 );
 
 // Indexes for better query performance
-UserSchema.index({ totalVolumeTraded: -1 });
-UserSchema.index({ totalPositions: -1 });
+UserSchema.index({ nonce: -1 });
 UserSchema.index({ updatedAt: -1 });
 
-export const User = mongoose.model<IUser>('User', UserSchema);
+export const User = mongoose.model<IUser>("User", UserSchema);

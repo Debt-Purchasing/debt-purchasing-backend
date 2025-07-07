@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
-import { config } from '../config';
+import mongoose from "mongoose";
+import { config } from "../config";
 
 export class DatabaseService {
   private static instance: DatabaseService;
@@ -16,7 +16,7 @@ export class DatabaseService {
 
   public async connect(): Promise<void> {
     if (this.isConnected) {
-      console.log('Database already connected');
+      console.log("Database already connected");
       return;
     }
 
@@ -30,25 +30,25 @@ export class DatabaseService {
       });
 
       this.isConnected = true;
-      console.log('✅ Connected to MongoDB successfully');
+      console.log("✅ Connected to MongoDB successfully");
 
       // Handle connection events
-      mongoose.connection.on('error', error => {
-        console.error('❌ MongoDB connection error:', error);
+      mongoose.connection.on("error", (error) => {
+        console.error("❌ MongoDB connection error:", error);
         this.isConnected = false;
       });
 
-      mongoose.connection.on('disconnected', () => {
-        console.log('⚠️  MongoDB disconnected');
+      mongoose.connection.on("disconnected", () => {
+        console.log("⚠️  MongoDB disconnected");
         this.isConnected = false;
       });
 
-      mongoose.connection.on('reconnected', () => {
-        console.log('✅ MongoDB reconnected');
+      mongoose.connection.on("reconnected", () => {
+        console.log("✅ MongoDB reconnected");
         this.isConnected = true;
       });
     } catch (error) {
-      console.error('❌ Failed to connect to MongoDB:', error);
+      console.error("❌ Failed to connect to MongoDB:", error);
       this.isConnected = false;
       throw error;
     }
@@ -62,9 +62,9 @@ export class DatabaseService {
     try {
       await mongoose.disconnect();
       this.isConnected = false;
-      console.log('✅ Disconnected from MongoDB');
+      console.log("✅ Disconnected from MongoDB");
     } catch (error) {
-      console.error('❌ Error disconnecting from MongoDB:', error);
+      console.error("❌ Error disconnecting from MongoDB:", error);
       throw error;
     }
   }
@@ -78,7 +78,7 @@ export class DatabaseService {
       await mongoose.connection.db.admin().ping();
       return true;
     } catch (error) {
-      console.error('❌ MongoDB ping failed:', error);
+      console.error("❌ MongoDB ping failed:", error);
       return false;
     }
   }
