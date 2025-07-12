@@ -8,9 +8,12 @@ export interface IFullSellOrder {
   startTime: number;
   endTime: number;
   triggerHF: string;
+  buyer: string;
   // Full sell specific fields
   token: string;
-  percentOfEquity: string;
+  bonus: string; // Bonus percentage as string (basis points)
+  usdValue: string; // USD value of the order as decimal string
+  usdBonus: string; // USD bonus value as decimal string
   v: number;
   r: string;
   s: string;
@@ -24,12 +27,15 @@ export interface IPartialSellOrder {
   startTime: number;
   endTime: number;
   triggerHF: string;
+  buyer: string;
   // Partial sell specific fields
   interestRateMode: number; // 1 for stable, 2 for variable
   collateralOut: string;
   repayToken: string;
   repayAmount: string;
   bonus: string; // Bonus percentage as string
+  usdValue: string; // USD value of the order as decimal string
+  usdBonus: string; // USD bonus value as decimal string
   v: number;
   r: string;
   s: string;
@@ -49,6 +55,10 @@ export interface IOrder extends Document {
 
   // Order status
   status: "ACTIVE" | "EXECUTED" | "CANCELLED" | "EXPIRED";
+
+  // USD value tracking (populated from subgraph data)
+  usdValue?: string; // USD value of the order as decimal string
+  usdBonus?: string; // USD bonus value as decimal string
 
   // Execution details (populated when order gets executed on-chain)
   buyer?: string; // Buyer address when executed
@@ -106,10 +116,10 @@ const FullSellOrderSchema = new Schema(
       required: true,
       match: /^0x[a-fA-F0-9]{40}$/, // Ethereum address validation
     },
-    percentOfEquity: {
+    bonus: {
       type: String,
       required: true,
-      match: /^\d+$/, // Only digits for BigNumber string
+      match: /^\d+$/, // Only digits for BigNumber string (basis points)
     },
     v: {
       type: Number,
@@ -179,7 +189,7 @@ const PartialSellOrderSchema = new Schema(
     repayAmount: {
       type: String,
       required: true,
-      match: /^\d+$/, // Only digits for BigNumber string
+      match: /^\d+(\.\d+)?$/, // Decimal format: digits with optional decimal point (stored as decimal)
     },
     bonus: {
       type: String,
@@ -259,6 +269,18 @@ const OrderSchema = new Schema<IOrder>(
       enum: ["ACTIVE", "EXECUTED", "CANCELLED", "EXPIRED"],
       required: true,
       default: "ACTIVE",
+      index: true,
+    },
+
+    // USD value tracking (populated from subgraph data)
+    usdValue: {
+      type: String,
+      match: /^\d+(\.\d+)?$/, // Decimal format validation
+      index: true,
+    },
+    usdBonus: {
+      type: String,
+      match: /^\d+(\.\d+)?$/, // Decimal format validation
       index: true,
     },
 

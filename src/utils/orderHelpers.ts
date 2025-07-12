@@ -6,7 +6,7 @@ import { IFullSellOrder, IPartialSellOrder } from "../models/Order";
 // Note: These are simplified hashes - in production, use proper keccak256 from ethers
 export const FULL_SELL_ORDER_TYPE_HASH = ethers.utils.keccak256(
   ethers.utils.toUtf8Bytes(
-    "FullSellOrder(OrderTitle title,address token,uint256 percentOfEquity)OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
+    "FullSellOrder(OrderTitle title,address token,uint256 bonus)OrderTitle(address debt,uint256 debtNonce,uint256 startTime,uint256 endTime,uint256 triggerHF)"
   )
 );
 
@@ -34,10 +34,29 @@ export const DOMAIN_NAME = "AaveRouter";
 export const DOMAIN_VERSION = "1";
 
 /**
- * Generate unique order ID
+ * Generate titleHash for order based on order title fields
+ * This will be used as the unique order ID
  */
-export function generateOrderId(): string {
-  return crypto.randomBytes(16).toString("hex");
+export function generateOrderId(
+  orderType: "FULL" | "PARTIAL",
+  order: IFullSellOrder | IPartialSellOrder
+): string {
+  // Create title hash based on order title fields
+  const titleHash = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["bytes32", "address", "uint256", "uint256", "uint256", "uint256"],
+      [
+        ORDER_TITLE_TYPE_HASH,
+        order.debt,
+        order.debtNonce,
+        order.startTime,
+        order.endTime,
+        order.triggerHF,
+      ]
+    )
+  );
+
+  return titleHash;
 }
 
 /**
@@ -92,7 +111,7 @@ export function createEIP712FullSellOrderHash(
   const structHash = ethers.utils.keccak256(
     ethers.utils.defaultAbiCoder.encode(
       ["bytes32", "bytes32", "address", "uint256"],
-      [FULL_SELL_ORDER_TYPE_HASH, titleHash, order.token, order.percentOfEquity]
+      [FULL_SELL_ORDER_TYPE_HASH, titleHash, order.token, order.bonus]
     )
   );
 
@@ -306,6 +325,15 @@ export function isValidBigNumberString(value: string): boolean {
 }
 
 /**
+ * Validate decimal string format (e.g., "1000.5" or "1000")
+ */
+export function isValidDecimalString(value: string): boolean {
+  return (
+    /^\d+(\.\d+)?$/.test(value) && !isNaN(parseFloat(value)) && value !== ""
+  );
+}
+
+/**
  * Validate full sell order structure
  */
 export function validateFullSellOrder(order: IFullSellOrder): {
@@ -332,8 +360,8 @@ export function validateFullSellOrder(order: IFullSellOrder): {
   if (!isValidBigNumberString(order.triggerHF)) {
     errors.push("Invalid trigger health factor");
   }
-  if (!validatePercentage(order.percentOfEquity)) {
-    errors.push("Invalid percent of equity (must be 1-10000)");
+  if (!validatePercentage(order.bonus)) {
+    errors.push("Invalid bonus percentage (must be 1-10000)");
   }
 
   // Validate signature components

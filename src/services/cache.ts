@@ -3,13 +3,16 @@ import { config } from "../config";
 import { AssetConfiguration } from "../models/AssetConfiguration";
 import { DebtPosition } from "../models/DebtPosition";
 import { Order } from "../models/Order"; // Orders (both pending and executed)
+import { ProtocolMetrics } from "../models/ProtocolMetrics";
 import { Token } from "../models/Token";
 import { User } from "../models/User";
 import {
   SubgraphAssetConfiguration,
+  SubgraphCancelledOrder,
   SubgraphDebtPosition,
   SubgraphFullOrder,
   SubgraphPartialOrder,
+  SubgraphProtocolMetrics,
   SubgraphToken,
   SubgraphUser,
 } from "../types";
@@ -93,6 +96,8 @@ export class SubgraphCacheService {
         partialOrderExecutions,
         priceTokens,
         liquidationThresholds,
+        cancelledOrders,
+        protocolMetrics,
       } = await this.subgraphService.fetchAllData();
 
       await Promise.all([
@@ -108,6 +113,8 @@ export class SubgraphCacheService {
         this.cacheLiquidationThresholds(
           liquidationThresholds.data?.assetConfigurations || []
         ),
+        this.cacheCancelledOrders(cancelledOrders.data?.cancelledOrders || []),
+        this.cacheProtocolMetrics(protocolMetrics.data?.protocolMetrics),
       ]);
 
       const duration = Date.now() - startTime;
@@ -243,8 +250,9 @@ export class SubgraphCacheService {
     execution: SubgraphFullOrder
   ): Promise<void> {
     try {
+      // Since titleHash is now the ID, we can find the order directly by ID
       const order = await Order.findOne({
-        titleHash: execution.titleHash,
+        id: execution.titleHash,
         orderType: "FULL",
       });
       const debtPositionId = order?.debtAddress || "";
@@ -255,23 +263,14 @@ export class SubgraphCacheService {
         `🔄 Processing order execution for debt ${debtPositionId}, new nonce: ${newNonce}`
       );
 
-      await DebtPosition.updateOne(
-        { id: debtPositionId },
-        {
-          $set: {
-            nonce: newNonce,
-            owner: execution.buyer,
-            lastUpdatedAt: executionTime,
-          },
-        }
-      );
-
       await Order.updateOne(
         { id: execution.titleHash, orderType: "FULL" },
         {
           $set: {
             status: "EXECUTED",
             buyer: execution.buyer,
+            usdValue: execution.usdValue,
+            usdBonus: execution.usdBonus,
             blockNumber: execution.blockNumber,
             txHash: execution.id,
             updatedAt: executionTime,
@@ -290,32 +289,18 @@ export class SubgraphCacheService {
     execution: SubgraphPartialOrder
   ): Promise<void> {
     try {
-      const order = await Order.findOne({
-        titleHash: execution.titleHash,
-        orderType: "PARTIAL",
-      });
-      const debtPositionId = order?.debtAddress || "";
-      const newNonce = (order?.debtNonce || 0) + 1;
       const executionTime = new Date(parseInt(execution.blockTimestamp) * 1000);
 
-      await DebtPosition.updateOne(
-        { id: debtPositionId },
-        {
-          $set: {
-            nonce: newNonce,
-            lastUpdatedAt: executionTime,
-          },
-        }
-      );
-
       await Order.updateOne(
-        { titleHash: execution.titleHash, orderType: "PARTIAL" },
+        { id: execution.titleHash, orderType: "PARTIAL" },
         {
           $set: {
             status: "EXECUTED",
             buyer: execution.buyer,
             blockNumber: execution.blockNumber,
             txHash: execution.id,
+            usdValue: execution.usdValue,
+            usdBonus: execution.usdBonus,
             updatedAt: executionTime,
           },
         }
@@ -336,8 +321,8 @@ export class SubgraphCacheService {
     currentNonce: number
   ): Promise<void> {
     try {
-      // Cancel all active orders with nonce less than current nonce
-      const cancelResult = await Order.updateMany(
+      // Cancel all active orders with nonce less than current nonce (old orders)
+      const cancelOldResult = await Order.updateMany(
         {
           debtAddress: debtPositionId,
           debtNonce: { $lt: currentNonce },
@@ -346,19 +331,26 @@ export class SubgraphCacheService {
         {
           $set: {
             status: "CANCELLED",
+            cancelReason: "Position nonce updated - old orders cancelled",
             updatedAt: new Date(),
           },
         }
       );
 
-      if (cancelResult.modifiedCount > 0) {
+      if (cancelOldResult.modifiedCount > 0) {
         console.log(
-          `🚫 Cancelled ${cancelResult.modifiedCount} orders for debt ${debtPositionId} with nonce < ${currentNonce}`
+          `🚫 Cancelled ${cancelOldResult.modifiedCount} old orders for debt ${debtPositionId} with nonce < ${currentNonce}`
         );
       }
+
+      // ✅ FIXED: Do NOT cancel orders with debtNonce = currentNonce
+      // Orders with current nonce are still valid and should remain active
+      console.log(
+        `✅ Orders with nonce = ${currentNonce} for debt ${debtPositionId} remain active (still valid)`
+      );
     } catch (error) {
       console.error(
-        `❌ Failed to cancel old orders for debt ${debtPositionId}:`,
+        `❌ Failed to cancel orders for debt ${debtPositionId}:`,
         error
       );
     }
@@ -424,6 +416,117 @@ export class SubgraphCacheService {
       );
     } catch (error) {
       console.error("❌ Failed to cache asset configurations:", error);
+    }
+  }
+
+  private async cacheCancelledOrders(
+    cancelledOrders: SubgraphCancelledOrder[]
+  ): Promise<void> {
+    if (cancelledOrders.length === 0) return;
+
+    try {
+      // Process each cancelled order to update order status in database
+      for (const cancelledOrder of cancelledOrders) {
+        await this.processCancelledOrder(cancelledOrder);
+      }
+
+      console.log(`🚫 Processed ${cancelledOrders.length} cancelled orders`);
+    } catch (error) {
+      console.error("❌ Failed to process cancelled orders:", error);
+    }
+  }
+
+  private async processCancelledOrder(
+    cancelledOrder: SubgraphCancelledOrder
+  ): Promise<void> {
+    try {
+      const cancelledTime = new Date(
+        parseInt(cancelledOrder.cancelledAt) * 1000
+      );
+
+      // Update order status to CANCELLED using the titleHash as ID
+      const updateResult = await Order.updateOne(
+        { id: cancelledOrder.titleHash },
+        {
+          $set: {
+            status: "CANCELLED",
+            cancelledAt: cancelledTime,
+            cancelReason: "Cancelled on-chain",
+            updatedAt: cancelledTime,
+          },
+        }
+      );
+
+      if (updateResult.modifiedCount > 0) {
+        console.log(`🚫 Order ${cancelledOrder.titleHash} marked as cancelled`);
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to process cancelled order ${cancelledOrder.titleHash}:`,
+        error
+      );
+    }
+  }
+
+  private async cacheProtocolMetrics(
+    protocolMetrics: SubgraphProtocolMetrics | null | undefined
+  ): Promise<void> {
+    // ProtocolMetrics is a singleton entity
+    if (!protocolMetrics) {
+      console.log("⚠️ No protocol metrics data found");
+      return;
+    }
+
+    try {
+      // Transform collaterals to flatten token object
+      const transformedCollaterals = protocolMetrics.collaterals.map(
+        (collateral) => ({
+          id: collateral.id,
+          token: collateral.token.id, // Extract token address from object
+          symbol: collateral.token.symbol,
+          decimals: collateral.token.decimals,
+          amount: collateral.amount,
+        })
+      );
+
+      // Transform debts to flatten token object
+      const transformedDebts = protocolMetrics.debts.map((debt) => ({
+        id: debt.id,
+        token: debt.token.id, // Extract token address from object
+        symbol: debt.token.symbol,
+        decimals: debt.token.decimals,
+        amount: debt.amount,
+      }));
+
+      const lastUpdatedAt = new Date(
+        parseInt(protocolMetrics.lastUpdatedAt) * 1000
+      );
+
+      // Replace the single protocol metrics record (create if not exists)
+      const result = await ProtocolMetrics.replaceOne(
+        { id: "protocol" }, // Only one record with id "protocol"
+        {
+          id: protocolMetrics.id,
+          totalPositions: protocolMetrics.totalPositions,
+          totalUsers: protocolMetrics.totalUsers,
+          fullOrdersUSD: protocolMetrics.fullOrdersUSD,
+          partialOrdersUSD: protocolMetrics.partialOrdersUSD,
+          collaterals: transformedCollaterals,
+          debts: transformedDebts,
+          lastUpdatedAt,
+        },
+        { upsert: true }
+      );
+
+      if (result.upsertedCount > 0) {
+        console.log("📊 Protocol metrics cached: 1 new record created");
+      } else if (result.modifiedCount > 0) {
+        console.log("📊 Protocol metrics cached: 1 record updated");
+      } else {
+        console.log("📊 Protocol metrics: no changes detected");
+      }
+    } catch (error) {
+      console.error("❌ Failed to cache protocol metrics:", error);
     }
   }
 
@@ -494,6 +597,24 @@ export class SubgraphCacheService {
       .lean();
   }
 
+  public async getCachedProtocolMetrics(): Promise<any> {
+    try {
+      // Get the single protocol metrics record
+      const protocolMetrics = await ProtocolMetrics.findOne({
+        id: "protocol",
+      }).lean();
+
+      if (!protocolMetrics) {
+        return null;
+      }
+
+      return protocolMetrics;
+    } catch (error) {
+      console.error("❌ Failed to get cached protocol metrics:", error);
+      return null;
+    }
+  }
+
   public async getStats(): Promise<any> {
     const [
       userCount,
@@ -502,6 +623,7 @@ export class SubgraphCacheService {
       pendingOrderCount,
       tokenCount,
       assetConfigCount,
+      protocolMetrics,
     ] = await Promise.all([
       User.countDocuments(),
       DebtPosition.countDocuments(),
@@ -509,6 +631,7 @@ export class SubgraphCacheService {
       Order.countDocuments({ status: "ACTIVE" }),
       Token.countDocuments(),
       AssetConfiguration.countDocuments(),
+      this.getCachedProtocolMetrics(),
     ]);
 
     return {
@@ -518,6 +641,23 @@ export class SubgraphCacheService {
       pendingOrders: pendingOrderCount, // Orders waiting to be executed
       tokens: tokenCount,
       assetConfigurations: assetConfigCount,
+      protocolMetrics: protocolMetrics
+        ? {
+            totalPositions: protocolMetrics.totalPositions,
+            totalUsers: protocolMetrics.totalUsers,
+            fullOrdersUSD: protocolMetrics.fullOrdersUSD,
+            partialOrdersUSD: protocolMetrics.partialOrdersUSD,
+            totalCollateralAmount: protocolMetrics.collaterals.reduce(
+              (sum: number, col: any) => sum + parseFloat(col.amount),
+              0
+            ),
+            totalDebtAmount: protocolMetrics.debts.reduce(
+              (sum: number, debt: any) => sum + parseFloat(debt.amount),
+              0
+            ),
+            lastUpdatedAt: protocolMetrics.lastUpdatedAt,
+          }
+        : null,
       lastUpdate: new Date().toISOString(),
       cacheEnabled: config.cache.enabled,
       intervalSeconds: config.cache.intervalSeconds,

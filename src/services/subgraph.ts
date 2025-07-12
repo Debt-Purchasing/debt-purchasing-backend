@@ -4,11 +4,22 @@ import { GraphQLQuery, GraphQLResponse } from "../types";
 
 export class SubgraphService {
   private static instance: SubgraphService;
-  private axiosInstance: AxiosInstance;
+  private endpoints: string[];
+  private currentEndpointIndex: number = 0;
 
   private constructor() {
-    this.axiosInstance = axios.create({
-      baseURL: config.subgraph.apiUrl,
+    // Initialize endpoints: primary + backup URLs
+    this.endpoints = [config.subgraph.apiUrl, ...config.subgraph.backupUrls];
+
+    console.log(
+      `🔧 SubgraphService initialized with ${this.endpoints.length} endpoints:`,
+      this.endpoints
+    );
+  }
+
+  private createAxiosInstance(baseURL: string): AxiosInstance {
+    const instance = axios.create({
+      baseURL,
       timeout: 10000,
       headers: {
         "Content-Type": "application/json",
@@ -17,10 +28,12 @@ export class SubgraphService {
     });
 
     // Add request/response interceptors for logging
-    this.axiosInstance.interceptors.request.use(
+    instance.interceptors.request.use(
       (config) => {
         console.log(
-          `🔄 Subgraph Request: ${config.method?.toUpperCase()} ${config.url}`
+          `🔄 Subgraph Request to ${baseURL}: ${config.method?.toUpperCase()} ${
+            config.url
+          }`
         );
         return config;
       },
@@ -30,20 +43,24 @@ export class SubgraphService {
       }
     );
 
-    this.axiosInstance.interceptors.response.use(
+    instance.interceptors.response.use(
       (response) => {
-        console.log(`✅ Subgraph Response: ${response.status}`);
+        console.log(`✅ Subgraph Response from ${baseURL}: ${response.status}`);
         return response;
       },
       (error) => {
         console.error(
-          "❌ Subgraph Response Error:",
+          "❌ Subgraph Response Error from",
+          baseURL,
+          ":",
           error.response?.status,
           error.message
         );
         return Promise.reject(error);
       }
     );
+
+    return instance;
   }
 
   public static getInstance(): SubgraphService {
@@ -56,27 +73,73 @@ export class SubgraphService {
   public async executeQuery<T = any>(
     query: GraphQLQuery
   ): Promise<GraphQLResponse<T>> {
-    try {
-      const response: AxiosResponse<GraphQLResponse<T>> =
-        await this.axiosInstance.post("", {
-          query: query.query,
-          variables: query.variables || {},
-          operationName: query.operationName || "Subgraphs",
-        });
+    const totalEndpoints = this.endpoints.length;
+    let lastError: Error | null = null;
 
-      if (response.data.errors && response.data.errors.length > 0) {
-        console.error("❌ GraphQL Errors:", response.data.errors);
+    // Try all endpoints starting from current index
+    for (let i = 0; i < totalEndpoints; i++) {
+      const endpointIndex = (this.currentEndpointIndex + i) % totalEndpoints;
+      const endpoint = this.endpoints[endpointIndex];
+
+      if (!endpoint) {
+        console.error(`❌ Endpoint at index ${endpointIndex} is undefined`);
+        continue;
       }
 
-      return response.data;
-    } catch (error) {
-      console.error("❌ Failed to execute subgraph query:", error);
-      throw new Error(
-        `Subgraph query failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
+      try {
+        console.log(
+          `🔄 Trying endpoint ${
+            endpointIndex + 1
+          }/${totalEndpoints}: ${endpoint}`
+        );
+
+        const axiosInstance = this.createAxiosInstance(endpoint);
+        const response: AxiosResponse<GraphQLResponse<T>> =
+          await axiosInstance.post("", {
+            query: query.query,
+            variables: query.variables || {},
+            operationName: query.operationName || "Subgraphs",
+          });
+
+        if (response.data.errors && response.data.errors.length > 0) {
+          console.error("❌ GraphQL Errors:", response.data.errors);
+        }
+
+        // Success! Update current endpoint index for next time
+        this.currentEndpointIndex = endpointIndex;
+        console.log(
+          `✅ Successfully used endpoint ${endpointIndex + 1}: ${endpoint}`
+        );
+
+        return response.data;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        console.error(
+          `❌ Failed to execute query on endpoint ${
+            endpointIndex + 1
+          } (${endpoint}):`,
+          errorMessage
+        );
+        lastError = error instanceof Error ? error : new Error(errorMessage);
+
+        // If this is the last endpoint, we'll throw the error
+        if (i === totalEndpoints - 1) {
+          break;
+        }
+
+        // Continue to next endpoint
+        console.log(`🔄 Trying next endpoint...`);
+      }
     }
+
+    // All endpoints failed, throw the last error
+    console.error("❌ All subgraph endpoints failed");
+    throw new Error(
+      `All subgraph endpoints failed. Last error: ${
+        lastError?.message || "Unknown error"
+      }`
+    );
   }
 
   public async fetchUsers(first = 100, skip = 0): Promise<GraphQLResponse> {
@@ -152,6 +215,8 @@ export class SubgraphService {
           id,
           titleHash,
           buyer,
+          usdValue,
+          usdBonus,
           blockTimestamp,
           blockNumber
         }
@@ -175,6 +240,8 @@ export class SubgraphService {
           id,
           titleHash,
           buyer,
+          usdValue,
+          usdBonus,
           blockTimestamp,
           blockNumber
         } 
@@ -237,6 +304,65 @@ export class SubgraphService {
     });
   }
 
+  public async fetchCancelledOrders(
+    first = 100,
+    skip = 0
+  ): Promise<GraphQLResponse> {
+    const query = `
+      query GetCancelledOrders($first: Int!, $skip: Int!) {
+        cancelledOrders(first: $first, skip: $skip, orderBy: cancelledAt, orderDirection: desc) {
+          id
+          titleHash
+          cancelledAt
+        }
+      }
+    `;
+
+    return this.executeQuery({
+      query,
+      variables: { first, skip },
+      operationName: "GetCancelledOrders",
+    });
+  }
+
+  public async fetchProtocolMetrics(): Promise<GraphQLResponse> {
+    const query = `
+      query GetProtocolMetrics {
+        protocolMetrics(id: "protocol") {
+          id
+          totalPositions
+          totalUsers
+          fullOrdersUSD
+          partialOrdersUSD
+          collaterals {
+            id
+            token {
+              id
+              symbol
+              decimals
+            }
+            amount
+          }
+          debts {
+            id
+            token {
+              id
+              symbol
+              decimals
+            }
+            amount
+          }
+          lastUpdatedAt
+        }
+      }
+    `;
+
+    return this.executeQuery({
+      query,
+      operationName: "GetProtocolMetrics",
+    });
+  }
+
   public async fetchAllData(): Promise<{
     users: GraphQLResponse;
     debtPositions: GraphQLResponse;
@@ -244,6 +370,8 @@ export class SubgraphService {
     partialOrderExecutions: GraphQLResponse;
     priceTokens: GraphQLResponse;
     liquidationThresholds: GraphQLResponse;
+    cancelledOrders: GraphQLResponse;
+    protocolMetrics: GraphQLResponse;
   }> {
     try {
       const [
@@ -253,6 +381,8 @@ export class SubgraphService {
         partialOrderExecutions,
         priceTokens,
         liquidationThresholds,
+        cancelledOrders,
+        protocolMetrics,
       ] = await Promise.all([
         this.fetchUsers(),
         this.fetchDebtPositions(),
@@ -260,6 +390,8 @@ export class SubgraphService {
         this.fetchPartialOrderExecutions(),
         this.fetchPriceTokens(),
         this.fetchLiquidationThresholds(),
+        this.fetchCancelledOrders(),
+        this.fetchProtocolMetrics(),
       ]);
 
       return {
@@ -269,6 +401,8 @@ export class SubgraphService {
         partialOrderExecutions,
         priceTokens,
         liquidationThresholds,
+        cancelledOrders,
+        protocolMetrics,
       };
     } catch (error) {
       console.error("❌ Failed to fetch all subgraph data:", error);

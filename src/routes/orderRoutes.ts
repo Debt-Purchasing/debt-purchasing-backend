@@ -178,7 +178,10 @@ router.post("/", async (req: Request, res: Response) => {
 
     // Create order document
     const orderData: Partial<IOrder> = {
-      id: generateOrderId(),
+      id: generateOrderId(
+        orderType,
+        orderType === "FULL" ? fullSellOrder : partialSellOrder!
+      ),
       orderType,
       chainId,
       contractAddress,
@@ -189,7 +192,52 @@ router.post("/", async (req: Request, res: Response) => {
     if (orderType === "FULL") {
       orderData.fullSellOrder = fullSellOrder;
     } else {
-      orderData.partialSellOrder = partialSellOrder;
+      // Convert repayAmount from wei to decimal format for database storage
+      const partialOrderForDB = { ...partialSellOrder! };
+
+      // Check if repayAmount is in wei format (large number), convert to decimal
+      const repayAmountBigInt = BigInt(partialSellOrder!.repayAmount);
+
+      // Get token decimals using same mapping as frontend
+      let tokenDecimals = 18; // Default to 18 decimals
+
+      // Token decimals mapping (should match frontend SUPPORTED_TOKENS)
+      const tokenDecimalsMap: Record<string, number> = {
+        // WETH
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": 18, // Mainnet
+        "0xd6c774778564ec1973b24a15ee4a5d00742e6575": 18, // Sepolia
+        // WBTC
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": 8, // Mainnet
+        "0x1b8ea7c3b44465be550ebaef50ff6bc5f25ee50c": 8, // Sepolia
+        // USDC
+        "0xa0b86a33e6e6ed6c7f7b8d4b7f8f6b7e6e6e6e6e": 6, // Mainnet
+        "0x005104eb2fd93a0c8f26e18934289ab91596e6bf": 6, // Sepolia
+        // DAI
+        "0x6b175474e89094c44da98b954eedeac495271d0f": 18, // Mainnet
+        "0xe0f11265b326df8f5c3e1db6aa8dcd506fd4cc5b": 18, // Sepolia
+        // USDT
+        "0xdac17f958d2ee523a2206206994597c13d831ec7": 6, // Mainnet
+        "0xd9126e24fc2e1bb395cca8b03c5e2aefabac35ea": 6, // Sepolia
+        // LINK
+        "0x514910771af9ca656af840dff83e8264ecf986ca": 18, // Mainnet
+        "0x2aa4fc36242b9e4e169542305d16dff2cc0ecdae": 18, // Sepolia
+      };
+
+      // Check if we have decimals info for this token (case insensitive)
+      const tokenAddress = partialSellOrder!.repayToken.toLowerCase();
+      for (const [addr, decimals] of Object.entries(tokenDecimalsMap)) {
+        if (addr.toLowerCase() === tokenAddress) {
+          tokenDecimals = decimals;
+          break;
+        }
+      }
+
+      const repayAmountDecimal = (
+        Number(repayAmountBigInt) / Math.pow(10, tokenDecimals)
+      ).toString();
+
+      partialOrderForDB.repayAmount = repayAmountDecimal;
+      orderData.partialSellOrder = partialOrderForDB;
     }
 
     const order = new Order(orderData);
@@ -302,6 +350,10 @@ router.get("/", async (req: Request, res: Response) => {
           debtPosition: debtPosition, // Include debt position data
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
+          buyer: order.buyer,
+          bonus: order.fullSellOrder?.bonus || order.partialSellOrder?.bonus,
+          usdValue: order.usdValue,
+          usdBonus: order.usdBonus,
         };
       })
     );

@@ -51,6 +51,8 @@ export interface SubgraphFullOrder {
   id: string;
   titleHash: string;
   buyer: string;
+  usdValue: string; // Base value of the order in USD
+  usdBonus: string; // Base bonus of the order in USD
   blockTimestamp: string;
   blockNumber: string;
 }
@@ -59,8 +61,17 @@ export interface SubgraphPartialOrder {
   id: string;
   titleHash: string;
   buyer: string;
+  usdValue: string; // Base value of the order in USD
+  usdBonus: string; // Base bonus of the order in USD
   blockTimestamp: string;
   blockNumber: string;
+}
+
+// Cancelled order entity from subgraph
+export interface SubgraphCancelledOrder {
+  id: string;
+  titleHash: string;
+  cancelledAt: string;
 }
 
 // Asset configuration entity from subgraph
@@ -112,6 +123,7 @@ export interface Config {
   subgraph: {
     apiUrl: string;
     apiKey: string;
+    backupUrls: string[];
   };
   cache: {
     intervalSeconds: number;
@@ -124,4 +136,36 @@ export interface Config {
   cors: {
     origins: string[];
   };
+}
+
+// Protocol Metrics entity from subgraph
+export interface SubgraphProtocolCollateral {
+  id: string;
+  token: {
+    id: string;
+    symbol: string;
+    decimals: number;
+  };
+  amount: string;
+}
+
+export interface SubgraphProtocolDebt {
+  id: string;
+  token: {
+    id: string;
+    symbol: string;
+    decimals: number;
+  };
+  amount: string;
+}
+
+export interface SubgraphProtocolMetrics {
+  id: string; // Always "protocol"
+  totalPositions: string;
+  totalUsers: string;
+  fullOrdersUSD: string;
+  partialOrdersUSD: string;
+  collaterals: SubgraphProtocolCollateral[];
+  debts: SubgraphProtocolDebt[];
+  lastUpdatedAt: string;
 }
